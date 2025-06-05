@@ -1,35 +1,35 @@
+const { getRoutesFromGoogle } = require("../services/googleDirectionsService");
+
 const calculateRoute = async (req, res) => {
   const { origin, destination } = req.body;
 
-  if (!origin || !destination) {
+  if (
+    !origin ||
+    !destination ||
+    !Array.isArray(origin) ||
+    !Array.isArray(destination) ||
+    origin.length !== 2 ||
+    destination.length !== 2
+  ) {
     return res
       .status(400)
-      .json({ error: "Origin and destination are required" });
+      .json({ error: "origin and destination must be [lat, lng]" });
   }
 
-  // Mocked routes (replace with real route calculations later)
-  const routes = [
-    {
-      routeId: 1,
-      score: 82.5,
-      path: [
-        [32.08, 34.78],
-        [32.07, 34.79],
-        [32.06, 34.8],
-      ],
-    },
-    {
-      routeId: 2,
-      score: 74.2,
-      path: [
-        [32.08, 34.78],
-        [32.075, 34.785],
-        [32.06, 34.8],
-      ],
-    },
-  ];
+  try {
+    const routes = await getRoutesFromGoogle(origin, destination);
 
-  res.status(200).json(routes);
+    const response = routes.map((route, i) => ({
+      routeId: route.routeId,
+      score: null,
+      path: route.path,
+    }));
+
+    res.status(200).json(response);
+  } catch (err) {
+    console.error("Failed to calculate route:", err);
+    res.status(500).json({ error: "Failed to calculate route" });
+  }
 };
 
 module.exports = { calculateRoute };
