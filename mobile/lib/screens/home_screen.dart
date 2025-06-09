@@ -1,7 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
-import 'package:city_path/screens/destination_screen.dart';
 import 'package:city_path/services/map_layer_service.dart';
+import 'package:city_path/screens/destination_search_screen.dart';
+import 'package:city_path/services/route_service.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -13,9 +14,13 @@ class HomeScreen extends StatefulWidget {
 class _HomeScreenState extends State<HomeScreen> {
   int _selectedIndex = 0;
   String? _selectedDestination;
-
+  List<double>? _selectedLatLng;
   GoogleMapController? _mapController;
   Set<Marker> _markers = {};
+  Set<Polyline> _polylines = {};
+
+  // דוגמת מיקום נוכחי קבוע (אפשר להחליף בשימוש אמיתי ב־geolocator)
+  final List<double> _currentLocation = [32.0853, 34.7818];
 
   @override
   Widget build(BuildContext context) {
@@ -34,27 +39,22 @@ class _HomeScreenState extends State<HomeScreen> {
               child: ClipRRect(
                 borderRadius: BorderRadius.circular(16),
                 child: GoogleMap(
-                  initialCameraPosition: const CameraPosition(
-                    target: LatLng(32.0853, 34.7818), // תל אביב
+                  initialCameraPosition: CameraPosition(
+                    target: LatLng(_currentLocation[0], _currentLocation[1]),
                     zoom: 14,
                   ),
                   onMapCreated: (controller) async {
                     _mapController = controller;
-
                     try {
                       final geoJson = await MapLayerService.fetchLayer('crime');
                       final features = geoJson['features'] as List;
-
                       Set<Marker> newMarkers = {};
-
                       for (var feature in features) {
                         final geometry = feature['geometry'];
                         final props = feature['properties'];
                         final coords = geometry['coordinates'];
-
                         final lat = coords[1];
                         final lng = coords[0];
-
                         final marker = Marker(
                           markerId: MarkerId('$lat$lng'),
                           position: LatLng(lat, lng),
@@ -66,10 +66,8 @@ class _HomeScreenState extends State<HomeScreen> {
                             BitmapDescriptor.hueRed,
                           ),
                         );
-
                         newMarkers.add(marker);
                       }
-
                       setState(() {
                         _markers = newMarkers;
                       });
@@ -81,6 +79,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   myLocationButtonEnabled: true,
                   zoomControlsEnabled: false,
                   markers: _markers,
+                  polylines: _polylines,
                 ),
               ),
             ),
@@ -89,7 +88,7 @@ class _HomeScreenState extends State<HomeScreen> {
               readOnly: true,
               decoration: InputDecoration(
                 prefixIcon: const Icon(Icons.search, color: Colors.black54),
-                hintText: 'Where would you like to go?',
+                hintText: _selectedDestination ?? 'Where would you like to go?',
                 hintStyle: const TextStyle(color: Colors.black54),
                 filled: true,
                 fillColor: const Color(0xFFF9F2E9),
@@ -112,17 +111,53 @@ class _HomeScreenState extends State<HomeScreen> {
               onTap: () async {
                 final selected = await Navigator.push(
                   context,
-                  MaterialPageRoute(builder: (_) => const DestinationScreen()),
+                  MaterialPageRoute(
+                    builder: (_) => const DestinationSearchScreen(),
+                  ),
                 );
-
-                if (selected != null && selected is String) {
+                if (selected != null && selected is Map) {
                   setState(() {
-                    _selectedDestination = selected;
+                    _selectedDestination = selected["address"];
+                    _selectedLatLng = List<double>.from(selected["latlng"]);
                   });
 
                   ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(content: Text('Selected: $selected')),
+                    SnackBar(content: Text('Selected: $_selectedDestination')),
                   );
+
+                  if (_selectedLatLng != null) {
+                    // קריאה לשרת לקבלת מסלולים
+                    try {
+                      final routes = await RouteService.fetchSafeRoutes(
+                        origin: _currentLocation,
+                        destination: _selectedLatLng!,
+                      );
+
+                      // דוגמה: ציור המסלול הראשון על המפה
+                      if (routes.isNotEmpty && routes[0]['path'] != null) {
+                        final List<dynamic> path = routes[0]['path'];
+                        final polylinePoints =
+                            path
+                                .map<LatLng>(
+                                  (coord) => LatLng(coord[0], coord[1]),
+                                )
+                                .toList();
+
+                        setState(() {
+                          _polylines = {
+                            Polyline(
+                              polylineId: const PolylineId('route_1'),
+                              color: Colors.blue,
+                              width: 6,
+                              points: polylinePoints,
+                            ),
+                          };
+                        });
+                      }
+                    } catch (e) {
+                      print("Failed to fetch or draw route: $e");
+                    }
+                  }
                 }
               },
             ),
