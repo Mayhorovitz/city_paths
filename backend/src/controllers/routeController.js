@@ -1,5 +1,6 @@
+// routeController.js - Updated to use the new scoring system
 const { getRoutesFromGoogle } = require("../services/googleDirectionsService");
-const { scoreRoute } = require("../services/routeScoringService");
+const { scoreRoute, scoreRoutes } = require("../services/routeScoringService");
 
 // POST /route/calculate - calculates and scores multiple routes
 const calculateRoute = async (req, res) => {
@@ -29,36 +30,55 @@ const calculateRoute = async (req, res) => {
       });
     }
 
-    // Score each route and collect additional feature counts
-    const scoredRoutes = await Promise.all(
-      routes.map(async (route) => {
-        try {
-          const { score, lightingCount, businessCount } = await scoreRoute(
-            route.path
-          );
-          return {
-            routeId: route.routeId,
-            score,
-            lightingCount, // number of lighting features along the route
-            businessCount, // number of open businesses along the route
-            path: route.path,
-            pathLength: route.path.length,
-            estimatedSafety: getSafetyLevel(score),
-          };
-        } catch (error) {
-          // If scoring failed, return a default route object
-          return {
-            routeId: route.routeId,
-            score: 50,
-            lightingCount: 0,
-            businessCount: 0,
-            path: route.path,
-            pathLength: route.path.length,
-            estimatedSafety: "unknown",
-          };
-        }
-      })
-    );
+    // Score all routes with relative normalization
+    let routeScores;
+    try {
+      // Extract just the paths for scoring
+      const routePaths = routes.map((route) => route.path);
+      routeScores = await scoreRoutes(routePaths);
+    } catch (scoringError) {
+      console.warn(
+        "New scoring system failed, falling back to individual scoring:",
+        scoringError.message
+      );
+      // Fallback to individual scoring
+      routeScores = await Promise.all(
+        routes.map(async (route) => await scoreRoute(route.path))
+      );
+    }
+
+    // Combine Google route data with our scoring data
+    const scoredRoutes = routes.map((route, index) => {
+      const scoreData = routeScores[index];
+
+      return {
+        routeId: route.routeId,
+        score: scoreData.score,
+
+        // Safety component scores for UI display
+        lightingScore: scoreData.lightingScore,
+        businessScore: scoreData.businessScore,
+        crimeScore: scoreData.crimeScore,
+
+        // Google data - duration and distance
+        walkingTime: {
+          minutes: route.duration.minutes,
+          text: route.duration.text,
+        },
+        distance: {
+          kilometers: route.distance.kilometers,
+          text: route.distance.text,
+        },
+
+        // Route geometry
+        path: route.path,
+        pathLength: route.path.length,
+        estimatedSafety: getSafetyLevel(scoreData.score),
+
+        // Additional Google route info
+        routeSummary: route.googleRouteData?.summary || "",
+      };
+    });
 
     // Sort by safety score (descending)
     scoredRoutes.sort((a, b) => b.score - a.score);
@@ -69,8 +89,15 @@ const calculateRoute = async (req, res) => {
       routeCount: scoredRoutes.length,
       routes: scoredRoutes,
       recommendation: scoredRoutes[0],
+      scoringInfo: {
+        lightingWeight: "50%",
+        businessWeight: "45%",
+        crimeWeight: "5%",
+        scoringMethod: "relative_normalization",
+      },
     });
   } catch (error) {
+    console.error("Route calculation error:", error);
     res.status(500).json({
       error: "Failed to calculate routes",
       details:

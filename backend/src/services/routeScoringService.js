@@ -1,11 +1,12 @@
+// routeScoringService.js - Updated with relative normalization
 const { getLayerDataForSafety } = require("./mapLayersService");
 const { getOpenBusinesses } = require("./businessService");
 
-// Layer weights: sum to 1.0 (100%)
+// Layer weights: sum to 95% (no crime data for now)
 const LAYER_WEIGHTS = {
   lighting: 0.5, // Street lighting – 50%
   business: 0.45, // Business density – 45%
-  crime: -0.05, // Crime data – 5% (negative)
+  crime: 0.05, // Crime data – 5% (will be perfect score for now)
   reports: 0, // Live user reports – 0%
 };
 
@@ -56,17 +57,38 @@ const buildSafetyGrid = async () => {
   return grid;
 };
 
-// Main route scoring function: returns an object with score, lightingCount, businessCount
-const scoreRoute = async (path) => {
+// Calculate total route distance in kilometers
+const calculateRouteDistance = (path) => {
+  if (!path || path.length < 2) return 0;
+
+  let totalDistance = 0;
+  for (let i = 1; i < path.length; i++) {
+    totalDistance += haversineDistance(
+      path[i - 1][0],
+      path[i - 1][1],
+      path[i][0],
+      path[i][1]
+    );
+  }
+  return totalDistance;
+};
+
+// Collect route data without scoring (for relative normalization)
+const collectRouteData = async (path) => {
   if (!path || path.length < 2) {
-    return { score: 0, lightingCount: 0, businessCount: 0 };
+    return {
+      lightingCount: 0,
+      businessCount: 0,
+      routeLengthKm: 0,
+      lightingDensity: 0,
+      businessDensity: 0,
+    };
   }
 
   const safetyGrid = await buildSafetyGrid();
   const sampledPath = samplePath(path, SAMPLE_DISTANCE_KM);
+  const routeLengthKm = calculateRouteDistance(path);
 
-  let totalScore = 0;
-  let scoredPoints = 0;
   let totalBusinessCount = 0;
   let totalLightingCount = 0;
 
@@ -77,14 +99,6 @@ const scoreRoute = async (path) => {
     const lightingScores = nearbyScores.filter((s) => s > 0);
     totalLightingCount += lightingScores.length;
 
-    if (nearbyScores.length > 0) {
-      const avgScore =
-        nearbyScores.reduce((sum, score) => sum + score, 0) /
-        nearbyScores.length;
-      totalScore += avgScore;
-      scoredPoints++;
-    }
-
     try {
       // Count open businesses at this sample point
       const businessesGeo = await getOpenBusinesses(lat, lng);
@@ -94,30 +108,101 @@ const scoreRoute = async (path) => {
     }
   }
 
-  let normalizedScore = 50;
-  if (scoredPoints > 0) {
-    const rawScore = totalScore / scoredPoints;
-    normalizedScore = Math.max(0, Math.min(100, 50 + rawScore * 10));
-  }
+  // Calculate densities (features per kilometer)
+  const lightingDensity =
+    routeLengthKm > 0 ? totalLightingCount / routeLengthKm : 0;
+  const businessDensity =
+    routeLengthKm > 0 ? totalBusinessCount / routeLengthKm : 0;
 
-  const avgBusinessCount = totalBusinessCount / sampledPath.length;
-  const businessScore = Math.min(1, avgBusinessCount / 10);
-  const businessWeighted = businessScore * (LAYER_WEIGHTS.business * 100);
-
-  const finalScore = Math.round(
-    normalizedScore *
-      (LAYER_WEIGHTS.lighting +
-        Math.abs(LAYER_WEIGHTS.crime) +
-        Math.abs(LAYER_WEIGHTS.reports)) +
-      businessWeighted
-  );
-
-  // Return both score and feature counts
   return {
-    score: Math.max(0, Math.min(100, finalScore)),
     lightingCount: totalLightingCount,
     businessCount: totalBusinessCount,
+    routeLengthKm: Math.round(routeLengthKm * 1000) / 1000,
+    lightingDensity: Math.round(lightingDensity * 100) / 100,
+    businessDensity: Math.round(businessDensity * 100) / 100,
   };
+};
+
+// Score multiple routes with relative normalization
+const scoreRoutes = async (allRoutesPaths) => {
+  if (!allRoutesPaths || allRoutesPaths.length === 0) {
+    return [];
+  }
+
+  // Collect data for all routes first
+  const routesData = await Promise.all(
+    allRoutesPaths.map(async (routePath) => {
+      return await collectRouteData(routePath);
+    })
+  );
+
+  // Find maximum densities across all routes
+  const maxLightingDensity = Math.max(
+    ...routesData.map((r) => r.lightingDensity)
+  );
+  const maxBusinessDensity = Math.max(
+    ...routesData.map((r) => r.businessDensity)
+  );
+
+  // Calculate scores with relative normalization
+  const scoredRoutes = routesData.map((routeData) => {
+    // Calculate component scores (0-100 scale)
+    const lightingScore =
+      maxLightingDensity > 0
+        ? (routeData.lightingDensity / maxLightingDensity) * 100
+        : 0;
+
+    const businessScore =
+      maxBusinessDensity > 0
+        ? (routeData.businessDensity / maxBusinessDensity) * 100
+        : 0;
+
+    // Crime score is perfect (100) since we don't have crime data
+    const crimeScore = 100;
+
+    // Calculate weighted final score
+    const finalScore = Math.round(
+      lightingScore * LAYER_WEIGHTS.lighting +
+        businessScore * LAYER_WEIGHTS.business +
+        crimeScore * LAYER_WEIGHTS.crime
+    );
+
+    return {
+      ...routeData,
+      lightingScore: Math.round(lightingScore * 100) / 100,
+      businessScore: Math.round(businessScore * 100) / 100,
+      crimeScore: Math.round(crimeScore * 100) / 100,
+      score: finalScore,
+      breakdown: {
+        lightingContribution:
+          Math.round(lightingScore * LAYER_WEIGHTS.lighting * 100) / 100,
+        businessContribution:
+          Math.round(businessScore * LAYER_WEIGHTS.business * 100) / 100,
+        crimeContribution:
+          Math.round(crimeScore * LAYER_WEIGHTS.crime * 100) / 100,
+      },
+    };
+  });
+
+  return scoredRoutes;
+};
+
+// Legacy function for backward compatibility - now just calls the new system
+const scoreRoute = async (path) => {
+  const results = await scoreRoutes([path]);
+  return (
+    results[0] || {
+      score: 0,
+      lightingCount: 0,
+      businessCount: 0,
+      routeLengthKm: 0,
+      lightingDensity: 0,
+      businessDensity: 0,
+      lightingScore: 0,
+      businessScore: 0,
+      crimeScore: 0,
+    }
+  );
 };
 
 // Path sampling (every X kilometers)
@@ -209,6 +294,8 @@ function toRad(degrees) {
 
 module.exports = {
   scoreRoute,
+  scoreRoutes, // New function for scoring multiple routes
   buildSafetyGrid,
   LAYER_WEIGHTS,
+  calculateRouteDistance,
 };
