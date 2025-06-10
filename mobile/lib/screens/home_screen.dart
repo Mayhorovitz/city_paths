@@ -3,6 +3,7 @@ import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:city_path/screens/destination_search_screen.dart';
 import 'package:city_path/screens/route_results_screen.dart';
+import 'package:city_path/screens/navigation_screen.dart';
 import 'package:city_path/services/route_service.dart';
 
 class HomeScreen extends StatefulWidget {
@@ -195,7 +196,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
                       if (routes.isNotEmpty) {
                         // Navigate to route results screen
-                        final selectedRoute = await Navigator.push(
+                        final result = await Navigator.push(
                           context,
                           MaterialPageRoute(
                             builder:
@@ -206,9 +207,27 @@ class _HomeScreenState extends State<HomeScreen> {
                           ),
                         );
 
-                        // If user selected a route, display it on the map
-                        if (selectedRoute != null) {
-                          _displaySelectedRoute(selectedRoute);
+                        // Handle the result from route results screen
+                        if (result != null && result is Map) {
+                          final action = result['action'];
+                          final selectedRoute = result['route'];
+
+                          if (action == 'select') {
+                            // User wants to see route on map
+                            _displaySelectedRoute(selectedRoute);
+                          } else if (action == 'navigate') {
+                            // User wants to start navigation
+                            Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder:
+                                    (_) => NavigationScreen(
+                                      selectedRoute: selectedRoute,
+                                      destinationAddress: _selectedDestination!,
+                                    ),
+                              ),
+                            );
+                          }
                         }
                       } else {
                         ScaffoldMessenger.of(context).showSnackBar(
