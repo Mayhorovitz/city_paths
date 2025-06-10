@@ -1,9 +1,11 @@
 const { getRoutesFromGoogle } = require("../services/googleDirectionsService");
 const { scoreRoute } = require("../services/routeScoringService");
 
+// POST /route/calculate - calculates and scores multiple routes
 const calculateRoute = async (req, res) => {
   const { origin, destination } = req.body;
 
+  // Input validation
   if (
     !origin ||
     !destination ||
@@ -18,9 +20,7 @@ const calculateRoute = async (req, res) => {
   }
 
   try {
-    console.log(`Calculating routes from [${origin}] to [${destination}]`);
-
-    // Get routes from Google
+    // Get alternative routes from Google
     const routes = await getRoutesFromGoogle(origin, destination);
 
     if (!routes || routes.length === 0) {
@@ -29,26 +29,29 @@ const calculateRoute = async (req, res) => {
       });
     }
 
-    // Score each route
+    // Score each route and collect additional feature counts
     const scoredRoutes = await Promise.all(
       routes.map(async (route) => {
         try {
-          const safetyScore = await scoreRoute(route.path);
-          return {
-            routeId: route.routeId,
-            score: safetyScore,
-            path: route.path,
-            pathLength: route.path.length,
-            estimatedSafety: getSafetyLevel(safetyScore),
-          };
-        } catch (error) {
-          console.warn(
-            `Failed to score route ${route.routeId}:`,
-            error.message
+          const { score, lightingCount, businessCount } = await scoreRoute(
+            route.path
           );
           return {
             routeId: route.routeId,
+            score,
+            lightingCount, // number of lighting features along the route
+            businessCount, // number of open businesses along the route
+            path: route.path,
+            pathLength: route.path.length,
+            estimatedSafety: getSafetyLevel(score),
+          };
+        } catch (error) {
+          // If scoring failed, return a default route object
+          return {
+            routeId: route.routeId,
             score: 50,
+            lightingCount: 0,
+            businessCount: 0,
             path: route.path,
             pathLength: route.path.length,
             estimatedSafety: "unknown",
@@ -57,11 +60,10 @@ const calculateRoute = async (req, res) => {
       })
     );
 
-    // Sort routes by safety score (desc)
+    // Sort by safety score (descending)
     scoredRoutes.sort((a, b) => b.score - a.score);
 
-    console.log(`Successfully calculated ${scoredRoutes.length} routes`);
-
+    // Response with all routes and recommended one
     res.status(200).json({
       success: true,
       routeCount: scoredRoutes.length,
@@ -69,7 +71,6 @@ const calculateRoute = async (req, res) => {
       recommendation: scoredRoutes[0],
     });
   } catch (error) {
-    console.error("Failed to calculate routes:", error);
     res.status(500).json({
       error: "Failed to calculate routes",
       details:
@@ -78,6 +79,7 @@ const calculateRoute = async (req, res) => {
   }
 };
 
+// Converts a numeric safety score to a textual level
 const getSafetyLevel = (score) => {
   if (score >= 80) return "very_safe";
   if (score >= 60) return "safe";

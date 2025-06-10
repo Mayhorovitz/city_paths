@@ -1,18 +1,17 @@
-const { getLayerData } = require("./mapLayersService");
+const { getLayerDataForSafety } = require("./mapLayersService");
+const { getOpenBusinesses } = require("./businessService");
 
-// Weights per the spec (total 100%)
+// Layer weights: sum to 1.0 (100%)
 const LAYER_WEIGHTS = {
-  lighting: 0.3, // Street lighting – 30%
-  business: 0.25, // Business density – 25%
-  userRatings: 0.2, // User ratings – 20%
-  crime: -0.15, // Crime data – 15% (negative)
-  reports: -0.1, // Live user reports – 10% (negative)
+  lighting: 0.5, // Street lighting – 50%
+  business: 0.45, // Business density – 45%
+  crime: -0.05, // Crime data – 5% (negative)
+  reports: 0, // Live user reports – 0%
 };
 
 const SEARCH_RADIUS_KM = 0.1; // 100m
 const SAMPLE_DISTANCE_KM = 0.05; // 50m sampling interval
 
-// Fast in-memory cache for safety grid
 let cachedSafetyData = null;
 let cacheTimestamp = 0;
 const CACHE_DURATION = 5 * 60 * 1000; // 5 minutes
@@ -27,19 +26,28 @@ const buildSafetyGrid = async () => {
 
   for (const [layer, weight] of Object.entries(LAYER_WEIGHTS)) {
     try {
-      const features = await getLayerData(layer);
-      for (const feature of features) {
-        const [lng, lat] = feature.geometry.coordinates;
-        const gridKey = `${Math.floor(lat * 1000)}_${Math.floor(lng * 1000)}`;
-        if (!grid.has(gridKey)) {
-          grid.set(gridKey, { lat, lng, scores: {} });
+      const features = await getLayerDataForSafety(layer);
+
+      if (features && features.length > 0) {
+        for (const feature of features) {
+          if (!feature.geometry || !feature.geometry.coordinates) continue;
+          const [lng, lat] = feature.geometry.coordinates;
+          if (isNaN(lat) || isNaN(lng)) continue;
+
+          const gridKey = `${Math.floor(lat * 1000)}_${Math.floor(lng * 1000)}`;
+          if (!grid.has(gridKey)) {
+            grid.set(gridKey, { lat, lng, scores: {} });
+          }
+
+          const level = feature.properties?.level || "medium";
+          const levelMultiplier = getLevelMultiplier(level);
+          const score = weight * levelMultiplier;
+          grid.get(gridKey).scores[layer] = score;
         }
-        const level = feature.properties.level || "medium";
-        const levelMultiplier = getLevelMultiplier(level);
-        grid.get(gridKey).scores[layer] = weight * levelMultiplier;
       }
     } catch (error) {
-      console.warn(`Failed to load ${layer} data:`, error.message);
+      // If fetching the layer fails, just skip it
+      continue;
     }
   }
 
@@ -48,18 +56,26 @@ const buildSafetyGrid = async () => {
   return grid;
 };
 
-// Main scoring function
+// Main route scoring function: returns an object with score, lightingCount, businessCount
 const scoreRoute = async (path) => {
-  if (!path || path.length < 2) return 0;
+  if (!path || path.length < 2) {
+    return { score: 0, lightingCount: 0, businessCount: 0 };
+  }
 
   const safetyGrid = await buildSafetyGrid();
-
   const sampledPath = samplePath(path, SAMPLE_DISTANCE_KM);
+
   let totalScore = 0;
   let scoredPoints = 0;
+  let totalBusinessCount = 0;
+  let totalLightingCount = 0;
 
   for (const [lat, lng] of sampledPath) {
     const nearbyScores = findNearbyScores(lat, lng, safetyGrid);
+
+    // Count lighting points by positive lighting scores in grid
+    const lightingScores = nearbyScores.filter((s) => s > 0);
+    totalLightingCount += lightingScores.length;
 
     if (nearbyScores.length > 0) {
       const avgScore =
@@ -68,23 +84,47 @@ const scoreRoute = async (path) => {
       totalScore += avgScore;
       scoredPoints++;
     }
+
+    try {
+      // Count open businesses at this sample point
+      const businessesGeo = await getOpenBusinesses(lat, lng);
+      totalBusinessCount += businessesGeo.features.length;
+    } catch (err) {
+      // Ignore API failures, just skip this point
+    }
   }
 
-  if (scoredPoints === 0) return 50; // default score if no data
+  let normalizedScore = 50;
+  if (scoredPoints > 0) {
+    const rawScore = totalScore / scoredPoints;
+    normalizedScore = Math.max(0, Math.min(100, 50 + rawScore * 10));
+  }
 
-  // Normalize to 0-100
-  const rawScore = totalScore / scoredPoints;
-  const normalizedScore = Math.max(0, Math.min(100, 50 + rawScore * 10));
-  return Math.round(normalizedScore);
+  const avgBusinessCount = totalBusinessCount / sampledPath.length;
+  const businessScore = Math.min(1, avgBusinessCount / 10);
+  const businessWeighted = businessScore * (LAYER_WEIGHTS.business * 100);
+
+  const finalScore = Math.round(
+    normalizedScore *
+      (LAYER_WEIGHTS.lighting +
+        Math.abs(LAYER_WEIGHTS.crime) +
+        Math.abs(LAYER_WEIGHTS.reports)) +
+      businessWeighted
+  );
+
+  // Return both score and feature counts
+  return {
+    score: Math.max(0, Math.min(100, finalScore)),
+    lightingCount: totalLightingCount,
+    businessCount: totalBusinessCount,
+  };
 };
 
-// Sample path every X kilometers
+// Path sampling (every X kilometers)
 const samplePath = (path, intervalKm) => {
   if (path.length <= 2) return path;
-
   const sampledPoints = [path[0]];
   let accumulatedDistance = 0;
-
   for (let i = 1; i < path.length; i++) {
     const segmentDistance = haversineDistance(
       path[i - 1][0],
@@ -136,7 +176,7 @@ const findNearbyScores = (lat, lng, safetyGrid) => {
   return scores;
 };
 
-// Convert severity to multiplier
+// Multiplier for severity/level string
 const getLevelMultiplier = (level) => {
   switch (level?.toLowerCase()) {
     case "low":
@@ -152,6 +192,7 @@ const getLevelMultiplier = (level) => {
   }
 };
 
+// Distance calculation in kilometers
 function haversineDistance(lat1, lon1, lat2, lon2) {
   const R = 6371;
   const dLat = toRad(lat2 - lat1);
@@ -161,6 +202,7 @@ function haversineDistance(lat1, lon1, lat2, lon2) {
     Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2;
   return R * 2 * Math.asin(Math.sqrt(a));
 }
+
 function toRad(degrees) {
   return degrees * (Math.PI / 180);
 }
