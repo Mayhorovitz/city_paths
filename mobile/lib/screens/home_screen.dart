@@ -1,7 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
-import 'package:city_path/services/map_layer_service.dart';
+import 'package:geolocator/geolocator.dart';
 import 'package:city_path/screens/destination_search_screen.dart';
+import 'package:city_path/screens/route_results_screen.dart';
 import 'package:city_path/services/route_service.dart';
 
 class HomeScreen extends StatefulWidget {
@@ -19,11 +20,83 @@ class _HomeScreenState extends State<HomeScreen> {
   Set<Marker> _markers = {};
   Set<Polyline> _polylines = {};
 
-  // Example fixed current location (can be replaced with real geolocator)
-  final List<double> _currentLocation = [32.0853, 34.7818];
+  // Current location - will be updated with real GPS coordinates
+  List<double>? _currentLocation;
+
+  @override
+  void initState() {
+    super.initState();
+    _getCurrentLocation();
+  }
+
+  // Get user's current location
+  Future<void> _getCurrentLocation() async {
+    try {
+      // Check if location services are enabled
+      bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
+      if (!serviceEnabled) {
+        // Location services are not enabled, use default location (Tel Aviv)
+        setState(() {
+          _currentLocation = [32.0853, 34.7818];
+        });
+        return;
+      }
+
+      // Check location permissions
+      LocationPermission permission = await Geolocator.checkPermission();
+      if (permission == LocationPermission.denied) {
+        permission = await Geolocator.requestPermission();
+        if (permission == LocationPermission.denied) {
+          // Permissions are denied, use default location
+          setState(() {
+            _currentLocation = [32.0853, 34.7818];
+          });
+          return;
+        }
+      }
+
+      if (permission == LocationPermission.deniedForever) {
+        // Permissions are denied forever, use default location
+        setState(() {
+          _currentLocation = [32.0853, 34.7818];
+        });
+        return;
+      }
+
+      // Get current position
+      Position position = await Geolocator.getCurrentPosition(
+        desiredAccuracy: LocationAccuracy.high,
+      );
+
+      setState(() {
+        _currentLocation = [position.latitude, position.longitude];
+      });
+
+      // Update map camera to current location
+      if (_mapController != null) {
+        _mapController!.animateCamera(
+          CameraUpdate.newLatLng(LatLng(position.latitude, position.longitude)),
+        );
+      }
+    } catch (e) {
+      print("Error getting current location: $e");
+      // Use default location if error occurs
+      setState(() {
+        _currentLocation = [32.0853, 34.7818];
+      });
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
+    // Show loading if current location is not available yet
+    if (_currentLocation == null) {
+      return const Scaffold(
+        backgroundColor: Color(0xFFF9F2E9),
+        body: Center(child: CircularProgressIndicator()),
+      );
+    }
+
     return Scaffold(
       backgroundColor: const Color(0xFFF9F2E9),
       appBar: AppBar(
@@ -40,40 +113,12 @@ class _HomeScreenState extends State<HomeScreen> {
                 borderRadius: BorderRadius.circular(16),
                 child: GoogleMap(
                   initialCameraPosition: CameraPosition(
-                    target: LatLng(_currentLocation[0], _currentLocation[1]),
+                    target: LatLng(_currentLocation![0], _currentLocation![1]),
                     zoom: 14,
                   ),
                   onMapCreated: (controller) async {
                     _mapController = controller;
-                    try {
-                      final geoJson = await MapLayerService.fetchLayer('crime');
-                      final features = geoJson['features'] as List;
-                      Set<Marker> newMarkers = {};
-                      for (var feature in features) {
-                        final geometry = feature['geometry'];
-                        final props = feature['properties'];
-                        final coords = geometry['coordinates'];
-                        final lat = coords[1];
-                        final lng = coords[0];
-                        final marker = Marker(
-                          markerId: MarkerId('$lat$lng'),
-                          position: LatLng(lat, lng),
-                          infoWindow: InfoWindow(
-                            title: props['description'] ?? 'Crime point',
-                            snippet: 'Level: ${props['level'] ?? 'unknown'}',
-                          ),
-                          icon: BitmapDescriptor.defaultMarkerWithHue(
-                            BitmapDescriptor.hueRed,
-                          ),
-                        );
-                        newMarkers.add(marker);
-                      }
-                      setState(() {
-                        _markers = newMarkers;
-                      });
-                    } catch (e) {
-                      print("Error loading crime layer: $e");
-                    }
+                    // Note: Crime layer loading removed as requested
                   },
                   myLocationEnabled: true,
                   myLocationButtonEnabled: true,
@@ -115,47 +160,75 @@ class _HomeScreenState extends State<HomeScreen> {
                     builder: (_) => const DestinationSearchScreen(),
                   ),
                 );
+
                 if (selected != null && selected is Map) {
                   setState(() {
                     _selectedDestination = selected["address"];
                     _selectedLatLng = List<double>.from(selected["latlng"]);
                   });
 
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(content: Text('Selected: $_selectedDestination')),
-                  );
-
                   if (_selectedLatLng != null) {
-                    // Call the server to get routes
+                    // Show loading dialog
+                    showDialog(
+                      context: context,
+                      barrierDismissible: false,
+                      builder: (BuildContext context) {
+                        return const Center(child: CircularProgressIndicator());
+                      },
+                    );
+
                     try {
-                      final routes = await RouteService.fetchSafeRoutes(
-                        origin: _currentLocation,
+                      // Call server to get routes from current location to destination
+                      final routeData = await RouteService.fetchSafeRoutes(
+                        origin: _currentLocation!,
                         destination: _selectedLatLng!,
                       );
 
-                      // Example: Draw the first route on the map
-                      if (routes.isNotEmpty && routes[0]['path'] != null) {
-                        final List<dynamic> path = routes[0]['path'];
-                        final polylinePoints =
-                            path
-                                .map<LatLng>(
-                                  (coord) => LatLng(coord[0], coord[1]),
-                                )
-                                .toList();
+                      // Close loading dialog
+                      Navigator.of(context).pop();
 
-                        setState(() {
-                          _polylines = {
-                            Polyline(
-                              polylineId: const PolylineId('route_1'),
-                              color: Colors.blue,
-                              width: 6,
-                              points: polylinePoints,
+                      // Extract routes from response
+                      final List<Map<String, dynamic>> routes =
+                          List<Map<String, dynamic>>.from(
+                            routeData['routes'] ?? [],
+                          );
+
+                      if (routes.isNotEmpty) {
+                        // Navigate to route results screen
+                        final selectedRoute = await Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder:
+                                (_) => RouteResultsScreen(
+                                  routes: routes,
+                                  destinationAddress: _selectedDestination!,
+                                ),
+                          ),
+                        );
+
+                        // If user selected a route, display it on the map
+                        if (selectedRoute != null) {
+                          _displaySelectedRoute(selectedRoute);
+                        }
+                      } else {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text(
+                              'No routes found for this destination',
                             ),
-                          };
-                        });
+                          ),
+                        );
                       }
                     } catch (e) {
-                      print("Failed to fetch or draw route: $e");
+                      // Close loading dialog
+                      Navigator.of(context).pop();
+
+                      print("Failed to fetch routes: $e");
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(
+                          content: Text('Failed to calculate routes: $e'),
+                        ),
+                      );
                     }
                   }
                 }
@@ -179,6 +252,102 @@ class _HomeScreenState extends State<HomeScreen> {
           BottomNavigationBarItem(icon: Icon(Icons.report), label: 'Reports'),
           BottomNavigationBarItem(icon: Icon(Icons.person), label: 'Profile'),
         ],
+      ),
+    );
+  }
+
+  // Display the selected route on the map
+  void _displaySelectedRoute(Map<String, dynamic> selectedRoute) {
+    try {
+      final List<dynamic> path = selectedRoute['path'] ?? [];
+
+      if (path.isNotEmpty) {
+        final polylinePoints =
+            path.map<LatLng>((coord) => LatLng(coord[0], coord[1])).toList();
+
+        // Route color based on safety level
+        Color routeColor = _getRouteColor(selectedRoute['score'] ?? 0);
+
+        setState(() {
+          _polylines = {
+            Polyline(
+              polylineId: PolylineId(
+                'selected_route_${selectedRoute['routeId']}',
+              ),
+              color: routeColor,
+              width: 6,
+              points: polylinePoints,
+            ),
+          };
+
+          // Clear existing markers and add destination marker
+          _markers.clear();
+          if (_selectedLatLng != null) {
+            _markers.add(
+              Marker(
+                markerId: const MarkerId('destination'),
+                position: LatLng(_selectedLatLng![0], _selectedLatLng![1]),
+                infoWindow: InfoWindow(
+                  title: 'Destination',
+                  snippet: _selectedDestination,
+                ),
+                icon: BitmapDescriptor.defaultMarkerWithHue(
+                  BitmapDescriptor.hueGreen,
+                ),
+              ),
+            );
+          }
+        });
+
+        // Focus on the route
+        if (polylinePoints.isNotEmpty && _mapController != null) {
+          _fitMapToRoute(polylinePoints);
+        }
+
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Route selected! Safety: ${selectedRoute['score']}%'),
+          ),
+        );
+      }
+    } catch (e) {
+      print("Error displaying route: $e");
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Error displaying route on map')),
+      );
+    }
+  }
+
+  // Determine route color based on safety score
+  Color _getRouteColor(int score) {
+    if (score >= 80) return Colors.green;
+    if (score >= 60) return Colors.orange;
+    return Colors.red;
+  }
+
+  // Fit map camera to show the entire route
+  void _fitMapToRoute(List<LatLng> points) {
+    if (points.isEmpty || _mapController == null) return;
+
+    double minLat = points.first.latitude;
+    double maxLat = points.first.latitude;
+    double minLng = points.first.longitude;
+    double maxLng = points.first.longitude;
+
+    for (final point in points) {
+      minLat = minLat < point.latitude ? minLat : point.latitude;
+      maxLat = maxLat > point.latitude ? maxLat : point.latitude;
+      minLng = minLng < point.longitude ? minLng : point.longitude;
+      maxLng = maxLng > point.longitude ? maxLng : point.longitude;
+    }
+
+    _mapController!.animateCamera(
+      CameraUpdate.newLatLngBounds(
+        LatLngBounds(
+          southwest: LatLng(minLat, minLng),
+          northeast: LatLng(maxLat, maxLng),
+        ),
+        100.0, // padding
       ),
     );
   }
