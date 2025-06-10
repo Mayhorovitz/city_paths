@@ -19,7 +19,7 @@ class _HomeScreenState extends State<HomeScreen> {
   Set<Marker> _markers = {};
   Set<Polyline> _polylines = {};
 
-  // דוגמת מיקום נוכחי קבוע (אפשר להחליף בשימוש אמיתי ב־geolocator)
+  // Example fixed current location (can be replaced with real geolocator)
   final List<double> _currentLocation = [32.0853, 34.7818];
 
   @override
@@ -126,14 +126,14 @@ class _HomeScreenState extends State<HomeScreen> {
                   );
 
                   if (_selectedLatLng != null) {
-                    // קריאה לשרת לקבלת מסלולים
+                    // Call the server to get routes
                     try {
                       final routes = await RouteService.fetchSafeRoutes(
                         origin: _currentLocation,
                         destination: _selectedLatLng!,
                       );
 
-                      // דוגמה: ציור המסלול הראשון על המפה
+                      // Example: Draw the first route on the map
                       if (routes.isNotEmpty && routes[0]['path'] != null) {
                         final List<dynamic> path = routes[0]['path'];
                         final polylinePoints =

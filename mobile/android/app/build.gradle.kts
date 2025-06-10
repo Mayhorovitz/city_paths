@@ -34,7 +34,10 @@ android {
         versionCode = flutter.versionCode
         versionName = flutter.versionName
 
+
         manifestPlaceholders["MAPS_API_KEY"] = mapsApiKey
+        resValue("string", "maps_api_key", mapsApiKey)
+
     }
 
     buildTypes {
