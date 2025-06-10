@@ -24,7 +24,7 @@ class RouteService {
         final Map<String, dynamic> data = jsonDecode(response.body);
 
         if (data['success'] == true) {
-          return data; // מחזיר את כל התגובה כולל routes, recommendation וכו'
+          return data;
         } else {
           throw Exception("Server returned success: false");
         }

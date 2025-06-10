@@ -3,7 +3,7 @@ import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:city_path/screens/destination_search_screen.dart';
 import 'package:city_path/screens/route_results_screen.dart';
-import 'package:city_path/screens/navigation_screen.dart';
+import 'package:city_path/screens/navigation_screen.dart'; // הוספה!
 import 'package:city_path/services/route_service.dart';
 
 class HomeScreen extends StatefulWidget {
@@ -20,6 +20,8 @@ class _HomeScreenState extends State<HomeScreen> {
   GoogleMapController? _mapController;
   Set<Marker> _markers = {};
   Set<Polyline> _polylines = {};
+  Map<String, dynamic>?
+  _selectedRouteData; // Store selected route for navigation
 
   // Current location - will be updated with real GPS coordinates
   List<double>? _currentLocation;
@@ -215,6 +217,8 @@ class _HomeScreenState extends State<HomeScreen> {
                           if (action == 'select') {
                             // User wants to see route on map
                             _displaySelectedRoute(selectedRoute);
+                            // Store route data for potential navigation
+                            _selectedRouteData = selectedRoute;
                           } else if (action == 'navigate') {
                             // User wants to start navigation
                             Navigator.push(
@@ -253,6 +257,46 @@ class _HomeScreenState extends State<HomeScreen> {
                 }
               },
             ),
+
+            // Show navigation button if a route is selected
+            if (_selectedRouteData != null) ...[
+              const SizedBox(height: 12),
+              Container(
+                width: double.infinity,
+                child: ElevatedButton.icon(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.blue,
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(vertical: 16),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(16),
+                    ),
+                    elevation: 4,
+                  ),
+                  onPressed: () {
+                    // Start navigation with selected route
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder:
+                            (_) => NavigationScreen(
+                              selectedRoute: _selectedRouteData!,
+                              destinationAddress: _selectedDestination!,
+                            ),
+                      ),
+                    );
+                  },
+                  icon: const Icon(Icons.navigation, size: 24),
+                  label: Text(
+                    'Start Navigation to ${_selectedDestination ?? 'Destination'}',
+                    style: const TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+              ),
+            ],
           ],
         ),
       ),
@@ -326,6 +370,21 @@ class _HomeScreenState extends State<HomeScreen> {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text('Route selected! Safety: ${selectedRoute['score']}%'),
+            action: SnackBarAction(
+              label: 'Navigate',
+              onPressed: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder:
+                        (_) => NavigationScreen(
+                          selectedRoute: selectedRoute,
+                          destinationAddress: _selectedDestination!,
+                        ),
+                  ),
+                );
+              },
+            ),
           ),
         );
       }
