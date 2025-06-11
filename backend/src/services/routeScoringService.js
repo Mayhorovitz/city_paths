@@ -1,4 +1,4 @@
-// routeScoringService.js - Updated with relative normalization
+// routeScoringService.js - Updated with optimizations
 const { getLayerDataForSafety } = require("./mapLayersService");
 const { getOpenBusinesses } = require("./businessService");
 
@@ -11,7 +11,7 @@ const LAYER_WEIGHTS = {
 };
 
 const SEARCH_RADIUS_KM = 0.1; // 100m
-const SAMPLE_DISTANCE_KM = 0.05; // 50m sampling interval
+const SAMPLE_DISTANCE_KM = 0.1; // Changed from 0.05 to 0.1 (100m instead of 50m)
 
 let cachedSafetyData = null;
 let cacheTimestamp = 0;
@@ -23,13 +23,17 @@ const buildSafetyGrid = async () => {
     return cachedSafetyData;
   }
 
+  console.log("Building safety grid...");
   const grid = new Map();
 
   for (const [layer, weight] of Object.entries(LAYER_WEIGHTS)) {
+    if (weight === 0) continue; // Skip layers with 0 weight
+
     try {
       const features = await getLayerDataForSafety(layer);
 
       if (features && features.length > 0) {
+        console.log(`Processing ${features.length} ${layer} features`);
         for (const feature of features) {
           if (!feature.geometry || !feature.geometry.coordinates) continue;
           const [lng, lat] = feature.geometry.coordinates;
@@ -47,13 +51,14 @@ const buildSafetyGrid = async () => {
         }
       }
     } catch (error) {
-      // If fetching the layer fails, just skip it
+      console.warn(`Failed to process ${layer} layer:`, error.message);
       continue;
     }
   }
 
   cachedSafetyData = grid;
   cacheTimestamp = now;
+  console.log(`Safety grid built with ${grid.size} points`);
   return grid;
 };
 
@@ -89,24 +94,36 @@ const collectRouteData = async (path) => {
   const sampledPath = samplePath(path, SAMPLE_DISTANCE_KM);
   const routeLengthKm = calculateRouteDistance(path);
 
+  console.log(
+    `Analyzing route: ${path.length} points -> ${
+      sampledPath.length
+    } sampled points (every ${SAMPLE_DISTANCE_KM * 1000}m)`
+  );
+
   let totalBusinessCount = 0;
   let totalLightingCount = 0;
+  let businessAPICallsMade = 0;
 
   for (const [lat, lng] of sampledPath) {
+    // Count lighting from safety grid
     const nearbyScores = findNearbyScores(lat, lng, safetyGrid);
-
-    // Count lighting points by positive lighting scores in grid
     const lightingScores = nearbyScores.filter((s) => s > 0);
     totalLightingCount += lightingScores.length;
 
+    // Count businesses (now with cache, much more efficient)
     try {
-      // Count open businesses at this sample point
       const businessesGeo = await getOpenBusinesses(lat, lng);
       totalBusinessCount += businessesGeo.features.length;
+      businessAPICallsMade++;
     } catch (err) {
-      // Ignore API failures, just skip this point
+      console.warn(`Business API failed for point ${lat},${lng}:`, err.message);
+      // Continue without this point's data
     }
   }
+
+  console.log(
+    `Route analysis complete: ${businessAPICallsMade} business API calls made for ${sampledPath.length} points`
+  );
 
   // Calculate densities (features per kilometer)
   const lightingDensity =
@@ -120,6 +137,8 @@ const collectRouteData = async (path) => {
     routeLengthKm: Math.round(routeLengthKm * 1000) / 1000,
     lightingDensity: Math.round(lightingDensity * 100) / 100,
     businessDensity: Math.round(businessDensity * 100) / 100,
+    sampledPoints: sampledPath.length,
+    apiCallsMade: businessAPICallsMade,
   };
 };
 
@@ -129,9 +148,14 @@ const scoreRoutes = async (allRoutesPaths) => {
     return [];
   }
 
+  console.log(`Scoring ${allRoutesPaths.length} routes...`);
+
   // Collect data for all routes first
   const routesData = await Promise.all(
-    allRoutesPaths.map(async (routePath) => {
+    allRoutesPaths.map(async (routePath, index) => {
+      console.log(
+        `Collecting data for route ${index + 1}/${allRoutesPaths.length}`
+      );
       return await collectRouteData(routePath);
     })
   );
@@ -144,8 +168,12 @@ const scoreRoutes = async (allRoutesPaths) => {
     ...routesData.map((r) => r.businessDensity)
   );
 
+  console.log(
+    `Max densities - Lighting: ${maxLightingDensity}, Business: ${maxBusinessDensity}`
+  );
+
   // Calculate scores with relative normalization
-  const scoredRoutes = routesData.map((routeData) => {
+  const scoredRoutes = routesData.map((routeData, index) => {
     // Calculate component scores (0-100 scale)
     const lightingScore =
       maxLightingDensity > 0
@@ -167,6 +195,12 @@ const scoreRoutes = async (allRoutesPaths) => {
         crimeScore * LAYER_WEIGHTS.crime
     );
 
+    console.log(
+      `Route ${index + 1} scored: ${finalScore}% (L:${Math.round(
+        lightingScore
+      )}% B:${Math.round(businessScore)}%)`
+    );
+
     return {
       ...routeData,
       lightingScore: Math.round(lightingScore * 100) / 100,
@@ -183,6 +217,12 @@ const scoreRoutes = async (allRoutesPaths) => {
       },
     };
   });
+
+  const totalAPICalls = routesData.reduce(
+    (sum, route) => sum + (route.apiCallsMade || 0),
+    0
+  );
+  console.log(`Total business API calls made: ${totalAPICalls}`);
 
   return scoredRoutes;
 };
@@ -205,11 +245,13 @@ const scoreRoute = async (path) => {
   );
 };
 
-// Path sampling (every X kilometers)
+// Path sampling (every X kilometers) - now 100m instead of 50m
 const samplePath = (path, intervalKm) => {
   if (path.length <= 2) return path;
+
   const sampledPoints = [path[0]];
   let accumulatedDistance = 0;
+
   for (let i = 1; i < path.length; i++) {
     const segmentDistance = haversineDistance(
       path[i - 1][0],
@@ -218,14 +260,18 @@ const samplePath = (path, intervalKm) => {
       path[i][1]
     );
     accumulatedDistance += segmentDistance;
+
     if (accumulatedDistance >= intervalKm) {
       sampledPoints.push(path[i]);
       accumulatedDistance = 0;
     }
   }
+
+  // Always include the last point
   if (sampledPoints[sampledPoints.length - 1] !== path[path.length - 1]) {
     sampledPoints.push(path[path.length - 1]);
   }
+
   return sampledPoints;
 };
 
@@ -294,8 +340,9 @@ function toRad(degrees) {
 
 module.exports = {
   scoreRoute,
-  scoreRoutes, // New function for scoring multiple routes
+  scoreRoutes,
   buildSafetyGrid,
   LAYER_WEIGHTS,
   calculateRouteDistance,
+  SAMPLE_DISTANCE_KM,
 };

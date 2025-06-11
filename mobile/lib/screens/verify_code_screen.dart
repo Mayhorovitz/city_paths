@@ -4,7 +4,16 @@ import 'package:city_path/screens/home_screen.dart';
 
 class VerifyCodeScreen extends StatefulWidget {
   final String phoneOrEmail;
-  const VerifyCodeScreen({super.key, required this.phoneOrEmail});
+  final bool isNewUser;
+  final Map<String, dynamic>? user;
+
+  const VerifyCodeScreen({
+    super.key,
+    required this.phoneOrEmail,
+    this.isNewUser = false,
+    this.user,
+  });
+
   @override
   State<VerifyCodeScreen> createState() => _VerifyCodeScreenState();
 }
@@ -47,11 +56,20 @@ class _VerifyCodeScreenState extends State<VerifyCodeScreen> {
       _isLoading = true;
     });
 
-    final success = await AuthService.sendRegisterRequest(widget.phoneOrEmail);
+    // Use the new auth service methods
+    Map<String, dynamic> result;
+    if (widget.isNewUser) {
+      // For new users, we need to extract phone and email
+      final phone = widget.user?['phone'] ?? widget.phoneOrEmail;
+      final email = widget.user?['email'] ?? widget.phoneOrEmail;
+      result = await AuthService.registerUser(phone: phone, email: email);
+    } else {
+      result = await AuthService.loginUser(phoneOrEmail: widget.phoneOrEmail);
+    }
 
     setState(() {
       _isLoading = false;
-      if (success) {
+      if (result['success']) {
         _canResend = false;
         _resendSeconds = 60;
         _startResendTimer();
@@ -60,7 +78,12 @@ class _VerifyCodeScreenState extends State<VerifyCodeScreen> {
 
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text(success ? "New code sent!" : "Error sending code"),
+        content: Text(
+          result['success']
+              ? "New code sent!"
+              : result['message'] ?? "Error sending code",
+        ),
+        backgroundColor: result['success'] ? Colors.green : Colors.red,
         behavior: SnackBarBehavior.floating,
       ),
     );
@@ -86,11 +109,9 @@ class _VerifyCodeScreenState extends State<VerifyCodeScreen> {
     final code = _getFullCode();
 
     if (code.length != 5) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text("Please enter the 5-digit verification code"),
-          behavior: SnackBarBehavior.floating,
-        ),
+      _showSnackBar(
+        "Please enter the 5-digit verification code",
+        isError: true,
       );
       return;
     }
@@ -99,25 +120,46 @@ class _VerifyCodeScreenState extends State<VerifyCodeScreen> {
       _isLoading = true;
     });
 
-    final success = await AuthService.verifyCode(widget.phoneOrEmail, code);
+    // Extract phone from phoneOrEmail or user data
+    String phone = widget.phoneOrEmail;
+    if (widget.user != null && widget.user!['phone'] != null) {
+      phone = widget.user!['phone'];
+    }
+
+    final result = await AuthService.verifyCode(phone: phone, code: code);
 
     setState(() {
       _isLoading = false;
     });
 
-    if (success) {
+    if (result['success']) {
+      _showSnackBar(result['message'] ?? "Verification successful!");
+
+      // Navigate to home screen
       Navigator.pushReplacement(
         context,
         MaterialPageRoute(builder: (_) => const HomeScreen()),
       );
     } else {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text("Invalid code"),
-          behavior: SnackBarBehavior.floating,
-        ),
-      );
+      _showSnackBar(result['message'] ?? "Invalid code", isError: true);
+
+      // Clear the code inputs on error
+      for (var controller in _controllers) {
+        controller.clear();
+      }
+      _focusNodes[0].requestFocus();
     }
+  }
+
+  void _showSnackBar(String message, {bool isError = false}) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message),
+        backgroundColor: isError ? Colors.red : Colors.green,
+        behavior: SnackBarBehavior.floating,
+        duration: Duration(seconds: isError ? 3 : 2),
+      ),
+    );
   }
 
   @override
@@ -139,9 +181,12 @@ class _VerifyCodeScreenState extends State<VerifyCodeScreen> {
         backgroundColor: const Color(0xFF004d71),
         elevation: 0,
         centerTitle: true,
-        title: const Text(
-          'Verify Code',
-          style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+        title: Text(
+          widget.isNewUser ? 'Complete Registration' : 'Verify Login',
+          style: const TextStyle(
+            color: Colors.white,
+            fontWeight: FontWeight.bold,
+          ),
         ),
       ),
       body: Container(
@@ -171,9 +216,11 @@ class _VerifyCodeScreenState extends State<VerifyCodeScreen> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        const Text(
-                          'Enter Verification Code',
-                          style: TextStyle(
+                        Text(
+                          widget.isNewUser
+                              ? 'Complete Your Registration'
+                              : 'Enter Verification Code',
+                          style: const TextStyle(
                             fontSize: 22,
                             fontWeight: FontWeight.bold,
                             color: Color(0xFF004d71),
@@ -187,6 +234,35 @@ class _VerifyCodeScreenState extends State<VerifyCodeScreen> {
                             fontSize: 14,
                           ),
                         ),
+
+                        // Show user info if available
+                        if (widget.user != null) ...[
+                          const SizedBox(height: 12),
+                          Container(
+                            padding: const EdgeInsets.all(12),
+                            decoration: BoxDecoration(
+                              color: Colors.blue.shade50,
+                              borderRadius: BorderRadius.circular(8),
+                              border: Border.all(color: Colors.blue.shade200),
+                            ),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                if (widget.user!['phone'] != null)
+                                  Text(
+                                    'Phone: ${widget.user!['phone']}',
+                                    style: const TextStyle(fontSize: 12),
+                                  ),
+                                if (widget.user!['email'] != null)
+                                  Text(
+                                    'Email: ${widget.user!['email']}',
+                                    style: const TextStyle(fontSize: 12),
+                                  ),
+                              ],
+                            ),
+                          ),
+                        ],
+
                         const SizedBox(height: 24),
                         // Verification code inputs
                         Row(
@@ -247,9 +323,11 @@ class _VerifyCodeScreenState extends State<VerifyCodeScreen> {
                                         strokeWidth: 2,
                                       ),
                                     )
-                                    : const Text(
-                                      'Verify Code',
-                                      style: TextStyle(
+                                    : Text(
+                                      widget.isNewUser
+                                          ? 'Complete Registration'
+                                          : 'Verify & Login',
+                                      style: const TextStyle(
                                         fontSize: 16,
                                         fontWeight: FontWeight.bold,
                                       ),
