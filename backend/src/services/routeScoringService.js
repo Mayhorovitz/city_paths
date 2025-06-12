@@ -1,21 +1,21 @@
-// routeScoringService.js - Updated with optimizations
+// routeScoringService.js
 const { getLayerDataForSafety } = require("./mapLayersService");
 const { getOpenBusinesses } = require("./businessService");
 
-// Layer weights: sum to 95% (no crime data for now)
+// Layer weights
 const LAYER_WEIGHTS = {
-  lighting: 0.5, // Street lighting – 50%
-  business: 0.45, // Business density – 45%
-  crime: 0.05, // Crime data – 5% (will be perfect score for now)
+  lighting: 0.45, // Street lighting – 45%
+  business: 0.35, // Business density – 35%
+  crime: 0.2, // Crime data – 20%
   reports: 0, // Live user reports – 0%
 };
 
-const SEARCH_RADIUS_KM = 0.1; // 100m
-const SAMPLE_DISTANCE_KM = 0.1; // Changed from 0.05 to 0.1 (100m instead of 50m)
+const SEARCH_RADIUS_KM = 0.1; // 100m for all layers
+const SAMPLE_DISTANCE_KM = 0.1; // 100m sampling interval
 
 let cachedSafetyData = null;
 let cacheTimestamp = 0;
-const CACHE_DURATION = 5 * 60 * 1000; // 5 minutes
+const CACHE_DURATION = 3 * 60 * 60 * 1000; // 3 hours
 
 const buildSafetyGrid = async () => {
   const now = Date.now();
@@ -46,8 +46,18 @@ const buildSafetyGrid = async () => {
 
           const level = feature.properties?.level || "medium";
           const levelMultiplier = getLevelMultiplier(level);
-          const score = weight * levelMultiplier;
-          grid.get(gridKey).scores[layer] = score;
+
+          // For crime  store the severity weighted count
+          if (layer === "crime") {
+            if (!grid.get(gridKey).scores[layer]) {
+              grid.get(gridKey).scores[layer] = 0;
+            }
+            grid.get(gridKey).scores[layer] += levelMultiplier;
+          } else {
+            // For lighting and business, store the weighted score as before
+            const score = weight * levelMultiplier;
+            grid.get(gridKey).scores[layer] = score;
+          }
         }
       }
     } catch (error) {
@@ -84,9 +94,11 @@ const collectRouteData = async (path) => {
     return {
       lightingCount: 0,
       businessCount: 0,
+      crimeCount: 0,
       routeLengthKm: 0,
       lightingDensity: 0,
       businessDensity: 0,
+      crimeDensity: 0,
     };
   }
 
@@ -102,41 +114,52 @@ const collectRouteData = async (path) => {
 
   let totalBusinessCount = 0;
   let totalLightingCount = 0;
+  let totalCrimeCount = 0;
   let businessAPICallsMade = 0;
 
   for (const [lat, lng] of sampledPath) {
     // Count lighting from safety grid
-    const nearbyScores = findNearbyScores(lat, lng, safetyGrid);
-    const lightingScores = nearbyScores.filter((s) => s > 0);
-    totalLightingCount += lightingScores.length;
+    const nearbyLightingScores = findNearbyScores(
+      lat,
+      lng,
+      safetyGrid,
+      "lighting"
+    );
+    totalLightingCount += nearbyLightingScores.length;
 
-    // Count businesses (now with cache, much more efficient)
+    // Count crime incidents from safety grid
+    const nearbyCrimeScores = findNearbyScores(lat, lng, safetyGrid, "crime");
+    const crimeWeightedCount = nearbyCrimeScores.reduce(
+      (sum, score) => sum + score,
+      0
+    );
+    totalCrimeCount += crimeWeightedCount;
+
+    // Count businesses (with cache)
     try {
       const businessesGeo = await getOpenBusinesses(lat, lng);
       totalBusinessCount += businessesGeo.features.length;
       businessAPICallsMade++;
     } catch (err) {
       console.warn(`Business API failed for point ${lat},${lng}:`, err.message);
-      // Continue without this point's data
     }
   }
-
-  console.log(
-    `Route analysis complete: ${businessAPICallsMade} business API calls made for ${sampledPath.length} points`
-  );
 
   // Calculate densities (features per kilometer)
   const lightingDensity =
     routeLengthKm > 0 ? totalLightingCount / routeLengthKm : 0;
   const businessDensity =
     routeLengthKm > 0 ? totalBusinessCount / routeLengthKm : 0;
+  const crimeDensity = routeLengthKm > 0 ? totalCrimeCount / routeLengthKm : 0;
 
   return {
     lightingCount: totalLightingCount,
     businessCount: totalBusinessCount,
+    crimeCount: totalCrimeCount,
     routeLengthKm: Math.round(routeLengthKm * 1000) / 1000,
     lightingDensity: Math.round(lightingDensity * 100) / 100,
     businessDensity: Math.round(businessDensity * 100) / 100,
+    crimeDensity: Math.round(crimeDensity * 100) / 100,
     sampledPoints: sampledPath.length,
     apiCallsMade: businessAPICallsMade,
   };
@@ -153,9 +176,6 @@ const scoreRoutes = async (allRoutesPaths) => {
   // Collect data for all routes first
   const routesData = await Promise.all(
     allRoutesPaths.map(async (routePath, index) => {
-      console.log(
-        `Collecting data for route ${index + 1}/${allRoutesPaths.length}`
-      );
       return await collectRouteData(routePath);
     })
   );
@@ -167,14 +187,10 @@ const scoreRoutes = async (allRoutesPaths) => {
   const maxBusinessDensity = Math.max(
     ...routesData.map((r) => r.businessDensity)
   );
-
-  console.log(
-    `Max densities - Lighting: ${maxLightingDensity}, Business: ${maxBusinessDensity}`
-  );
+  const maxCrimeDensity = Math.max(...routesData.map((r) => r.crimeDensity));
 
   // Calculate scores with relative normalization
   const scoredRoutes = routesData.map((routeData, index) => {
-    // Calculate component scores (0-100 scale)
     const lightingScore =
       maxLightingDensity > 0
         ? (routeData.lightingDensity / maxLightingDensity) * 100
@@ -185,8 +201,11 @@ const scoreRoutes = async (allRoutesPaths) => {
         ? (routeData.businessDensity / maxBusinessDensity) * 100
         : 0;
 
-    // Crime score is perfect (100) since we don't have crime data
-    const crimeScore = 100;
+    // Crime score is INVERTED - higher crime density = lower score
+    const crimeScore =
+      maxCrimeDensity > 0
+        ? 100 - (routeData.crimeDensity / maxCrimeDensity) * 100
+        : 100;
 
     // Calculate weighted final score
     const finalScore = Math.round(
@@ -198,7 +217,7 @@ const scoreRoutes = async (allRoutesPaths) => {
     console.log(
       `Route ${index + 1} scored: ${finalScore}% (L:${Math.round(
         lightingScore
-      )}% B:${Math.round(businessScore)}%)`
+      )}% B:${Math.round(businessScore)}% C:${Math.round(crimeScore)}%)`
     );
 
     return {
@@ -218,34 +237,10 @@ const scoreRoutes = async (allRoutesPaths) => {
     };
   });
 
-  const totalAPICalls = routesData.reduce(
-    (sum, route) => sum + (route.apiCallsMade || 0),
-    0
-  );
-  console.log(`Total business API calls made: ${totalAPICalls}`);
-
   return scoredRoutes;
 };
 
-// Legacy function for backward compatibility - now just calls the new system
-const scoreRoute = async (path) => {
-  const results = await scoreRoutes([path]);
-  return (
-    results[0] || {
-      score: 0,
-      lightingCount: 0,
-      businessCount: 0,
-      routeLengthKm: 0,
-      lightingDensity: 0,
-      businessDensity: 0,
-      lightingScore: 0,
-      businessScore: 0,
-      crimeScore: 0,
-    }
-  );
-};
-
-// Path sampling (every X kilometers) - now 100m instead of 50m
+// Path sampling (every X kilometers)
 const samplePath = (path, intervalKm) => {
   if (path.length <= 2) return path;
 
@@ -275,8 +270,8 @@ const samplePath = (path, intervalKm) => {
   return sampledPoints;
 };
 
-// Finds safety scores for points within SEARCH_RADIUS_KM
-const findNearbyScores = (lat, lng, safetyGrid) => {
+// Find safety scores within SEARCH_RADIUS_KM for specific layer
+const findNearbyScores = (lat, lng, safetyGrid, layer) => {
   const scores = [];
   const gridRange = Math.ceil(SEARCH_RADIUS_KM * 1000);
 
@@ -294,11 +289,10 @@ const findNearbyScores = (lat, lng, safetyGrid) => {
           gridPoint.lng
         );
         if (distance <= SEARCH_RADIUS_KM) {
-          const pointScore = Object.values(gridPoint.scores).reduce(
-            (sum, score) => sum + score,
-            0
-          );
-          scores.push(pointScore);
+          const layerScore = gridPoint.scores[layer];
+          if (layerScore !== undefined) {
+            scores.push(layerScore);
+          }
         }
       }
     }
@@ -339,7 +333,6 @@ function toRad(degrees) {
 }
 
 module.exports = {
-  scoreRoute,
   scoreRoutes,
   buildSafetyGrid,
   LAYER_WEIGHTS,

@@ -17,8 +17,8 @@ class RouteResultsScreen extends StatelessWidget {
       appBar: AppBar(
         backgroundColor: Colors.teal,
         title: const Text(
-          'Route Results',
-          style: TextStyle(color: Colors.white),
+          'Routes',
+          style: TextStyle(color: Colors.white, fontSize: 18),
         ),
         leading: IconButton(
           icon: const Icon(Icons.arrow_back, color: Colors.white),
@@ -27,10 +27,9 @@ class RouteResultsScreen extends StatelessWidget {
       ),
       body: Column(
         children: [
-          // Destination info
           Container(
             width: double.infinity,
-            padding: const EdgeInsets.all(16),
+            padding: const EdgeInsets.all(12),
             decoration: BoxDecoration(
               color: Colors.teal.shade50,
               border: Border(bottom: BorderSide(color: Colors.grey.shade300)),
@@ -41,23 +40,23 @@ class RouteResultsScreen extends StatelessWidget {
                 Text(
                   'To: $destinationAddress',
                   style: const TextStyle(
-                    fontSize: 16,
+                    fontSize: 14,
                     fontWeight: FontWeight.w500,
                   ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
                 ),
-                const SizedBox(height: 4),
+                const SizedBox(height: 2),
                 Text(
                   '${routes.length} routes found',
-                  style: TextStyle(fontSize: 14, color: Colors.grey.shade600),
+                  style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
                 ),
               ],
             ),
           ),
-
-          // Routes list
           Expanded(
             child: ListView.builder(
-              padding: const EdgeInsets.all(16),
+              padding: const EdgeInsets.all(12),
               itemCount: routes.length,
               itemBuilder: (context, index) {
                 final route = routes[index];
@@ -79,57 +78,59 @@ class RouteResultsScreen extends StatelessWidget {
     final walkingTime = route['walkingTime']?['minutes'] ?? 0;
     final distance = route['distance']?['text'] ?? '';
 
-    // Safety color based on score
     Color safetyColor = _getSafetyColor(safetyRating);
     IconData safetyIcon = _getSafetyIcon(safetyRating);
 
     return Card(
-      margin: const EdgeInsets.only(bottom: 16),
-      elevation: 4,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      margin: const EdgeInsets.only(bottom: 12),
+      elevation: 3,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
       child: Padding(
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.all(12),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // Header with safety rating
             Row(
               children: [
-                Icon(safetyIcon, color: safetyColor, size: 24),
-                const SizedBox(width: 8),
-                Text(
-                  'Safety Rating: $safetyRating%',
-                  style: TextStyle(
-                    fontSize: 18,
-                    fontWeight: FontWeight.bold,
-                    color: safetyColor,
+                Icon(safetyIcon, color: safetyColor, size: 20),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: Text(
+                    'Safety: $safetyRating%',
+                    style: TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.bold,
+                      color: safetyColor,
+                    ),
                   ),
                 ),
               ],
             ),
 
-            const SizedBox(height: 12),
+            const SizedBox(height: 8),
 
-            // Time and Distance
             Row(
               children: [
-                Icon(Icons.access_time, color: Colors.blue, size: 20),
-                const SizedBox(width: 4),
+                Icon(Icons.access_time, color: Colors.blue, size: 16),
+                const SizedBox(width: 3),
                 Text(
                   '$walkingTime min',
                   style: const TextStyle(
-                    fontSize: 16,
+                    fontSize: 14,
                     fontWeight: FontWeight.w500,
                   ),
                 ),
-                const SizedBox(width: 20),
-                Icon(Icons.location_on, color: Colors.green, size: 20),
-                const SizedBox(width: 4),
-                Text(
-                  distance,
-                  style: const TextStyle(
-                    fontSize: 16,
-                    fontWeight: FontWeight.w500,
+                const SizedBox(width: 16),
+                Icon(Icons.location_on, color: Colors.green, size: 16),
+                const SizedBox(width: 3),
+                Expanded(
+                  child: Text(
+                    distance,
+                    style: const TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w500,
+                    ),
+                    overflow: TextOverflow.ellipsis,
                   ),
                 ),
               ],
@@ -137,32 +138,32 @@ class RouteResultsScreen extends StatelessWidget {
 
             const SizedBox(height: 16),
 
-            // Safety indicators
             Row(
+              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
               children: [
                 _buildSafetyIndicator(
                   'Lighting',
                   (route['lightingScore'] ?? 0).toDouble(),
-                  Colors.blue,
+                  Colors.amber,
+                  Icons.lightbulb,
                 ),
-                const SizedBox(width: 20),
                 _buildSafetyIndicator(
                   'Crime',
                   (route['crimeScore'] ?? 0).toDouble(),
                   Colors.red,
+                  Icons.security,
                 ),
-                const SizedBox(width: 20),
                 _buildSafetyIndicator(
-                  'Businesses',
+                  'Business',
                   (route['businessScore'] ?? 0).toDouble(),
                   Colors.green,
+                  Icons.store,
                 ),
               ],
             ),
 
             const SizedBox(height: 16),
 
-            // Select Route Button
             Row(
               children: [
                 Expanded(
@@ -170,10 +171,11 @@ class RouteResultsScreen extends StatelessWidget {
                     style: ElevatedButton.styleFrom(
                       backgroundColor: Colors.grey.shade600,
                       foregroundColor: Colors.white,
-                      padding: const EdgeInsets.symmetric(vertical: 12),
+                      padding: const EdgeInsets.symmetric(vertical: 8),
                       shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(8),
+                        borderRadius: BorderRadius.circular(6),
                       ),
+                      minimumSize: const Size(0, 36),
                     ),
                     onPressed: () {
                       Navigator.pop(context, {
@@ -182,24 +184,25 @@ class RouteResultsScreen extends StatelessWidget {
                       });
                     },
                     child: const Text(
-                      'Select Route',
+                      'Select',
                       style: TextStyle(
-                        fontSize: 16,
+                        fontSize: 13,
                         fontWeight: FontWeight.w500,
                       ),
                     ),
                   ),
                 ),
-                const SizedBox(width: 12),
+                const SizedBox(width: 8),
                 Expanded(
                   child: ElevatedButton(
                     style: ElevatedButton.styleFrom(
                       backgroundColor: Colors.blue,
                       foregroundColor: Colors.white,
-                      padding: const EdgeInsets.symmetric(vertical: 12),
+                      padding: const EdgeInsets.symmetric(vertical: 8),
                       shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(8),
+                        borderRadius: BorderRadius.circular(6),
                       ),
+                      minimumSize: const Size(0, 36),
                     ),
                     onPressed: () {
                       Navigator.pop(context, {
@@ -210,12 +213,12 @@ class RouteResultsScreen extends StatelessWidget {
                     child: const Row(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
-                        Icon(Icons.navigation, size: 20),
-                        SizedBox(width: 4),
+                        Icon(Icons.navigation, size: 16),
+                        SizedBox(width: 3),
                         Text(
                           'Navigate',
                           style: TextStyle(
-                            fontSize: 16,
+                            fontSize: 13,
                             fontWeight: FontWeight.w500,
                           ),
                         ),
@@ -231,42 +234,55 @@ class RouteResultsScreen extends StatelessWidget {
     );
   }
 
-  Widget _buildSafetyIndicator(String title, double score, Color color) {
-    int fullTriangles =
-        (score / 20).floor(); // 5 triangles max, each represents 20%
-
-    return Column(
-      children: [
-        Text(
-          title,
-          style: TextStyle(
-            fontSize: 12,
-            fontWeight: FontWeight.w500,
-            color: color,
+  Widget _buildSafetyIndicator(
+    String title,
+    double score,
+    Color color,
+    IconData icon,
+  ) {
+    return Expanded(
+      child: Column(
+        children: [
+          Icon(icon, color: color, size: 24),
+          const SizedBox(height: 4),
+          Text(
+            title,
+            style: TextStyle(
+              fontSize: 12,
+              fontWeight: FontWeight.w600,
+              color: color,
+            ),
           ),
-        ),
-        const SizedBox(height: 4),
-        Container(
-          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-          decoration: BoxDecoration(
-            color: color.withOpacity(0.1),
-            borderRadius: BorderRadius.circular(8),
-          ),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: List.generate(5, (index) {
-              return Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 1),
-                child: Icon(
-                  Icons.keyboard_arrow_up,
-                  size: 12,
-                  color: index < fullTriangles ? color : color.withOpacity(0.3),
+          const SizedBox(height: 6),
+          Container(
+            width: double.infinity,
+            height: 8,
+            decoration: BoxDecoration(
+              color: color.withOpacity(0.2),
+              borderRadius: BorderRadius.circular(4),
+            ),
+            child: FractionallySizedBox(
+              alignment: Alignment.centerLeft,
+              widthFactor: score / 100,
+              child: Container(
+                decoration: BoxDecoration(
+                  color: color,
+                  borderRadius: BorderRadius.circular(4),
                 ),
-              );
-            }),
+              ),
+            ),
           ),
-        ),
-      ],
+          const SizedBox(height: 2),
+          Text(
+            '${score.round()}%',
+            style: TextStyle(
+              fontSize: 10,
+              fontWeight: FontWeight.bold,
+              color: color,
+            ),
+          ),
+        ],
+      ),
     );
   }
 
