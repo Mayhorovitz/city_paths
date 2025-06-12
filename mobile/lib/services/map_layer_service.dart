@@ -1,12 +1,11 @@
 import 'dart:convert';
 import 'package:http/http.dart' as http;
+import '../utils.dart';
 
 class MapLayerService {
-  static const String baseUrl = 'http://10.0.2.2:3000';
-
   // Fetch GeoJSON for a specific layer (e.g. "crime", "lighting", "business")
   static Future<Map<String, dynamic>> fetchLayer(String type) async {
-    final url = Uri.parse('$baseUrl/api/layers?type=$type');
+    final url = Uri.parse('${ApiConfig.baseUrl}/api/layers?type=$type');
 
     final response = await http.get(url);
 

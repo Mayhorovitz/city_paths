@@ -1,14 +1,13 @@
 import 'dart:convert';
 import 'package:http/http.dart' as http;
+import '../utils.dart';
 
 class RouteService {
-  static const String baseUrl = 'http://10.0.2.2:3000';
-
   static Future<Map<String, dynamic>> fetchSafeRoutes({
     required List<double> origin,
     required List<double> destination,
   }) async {
-    final url = Uri.parse('$baseUrl/api/routes/calculate');
+    final url = Uri.parse('${ApiConfig.baseUrl}/api/routes/calculate');
 
     try {
       final response = await http.post(

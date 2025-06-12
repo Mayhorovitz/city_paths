@@ -1,15 +1,14 @@
 import 'package:http/http.dart' as http;
 import 'dart:convert';
+import '../utils.dart';
 
 class AuthService {
-  static const String baseUrl = 'http://10.0.2.2:3000';
-
   // Register new user
   static Future<Map<String, dynamic>> registerUser({
     required String phone,
     required String email,
   }) async {
-    final url = Uri.parse('$baseUrl/api/auth/register');
+    final url = Uri.parse('${ApiConfig.baseUrl}/api/auth/register');
 
     try {
       final response = await http.post(
@@ -54,7 +53,7 @@ class AuthService {
   static Future<Map<String, dynamic>> loginUser({
     required String phoneOrEmail,
   }) async {
-    final url = Uri.parse('$baseUrl/api/auth/login');
+    final url = Uri.parse('${ApiConfig.baseUrl}/api/auth/login');
 
     try {
       // Determine if input is phone or email
@@ -107,7 +106,7 @@ class AuthService {
     required String phone,
     required String code,
   }) async {
-    final url = Uri.parse('$baseUrl/api/auth/verify');
+    final url = Uri.parse('${ApiConfig.baseUrl}/api/auth/verify');
 
     try {
       final response = await http.post(
@@ -143,7 +142,7 @@ class AuthService {
 
   // Get user profile
   static Future<Map<String, dynamic>> getUserProfile(String phone) async {
-    final url = Uri.parse('$baseUrl/api/auth/profile/$phone');
+    final url = Uri.parse('${ApiConfig.baseUrl}/api/auth/profile/$phone');
 
     try {
       final response = await http.get(url);
