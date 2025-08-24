@@ -3,20 +3,19 @@ const router = express.Router();
 const {
   registerUser,
   loginUser,
-  verifyCode,
   getUserProfile,
+  updateUserProfile,
+  changePassword,
+  authenticateToken,
 } = require("../controllers/authController");
 
-// POST /api/auth/register - Register new user
+// Public routes
 router.post("/register", registerUser);
-
-// POST /api/auth/login - Login existing user
 router.post("/login", loginUser);
 
-// POST /api/auth/verify - Verify code (for both register and login)
-router.post("/verify", verifyCode);
-
-// GET /api/auth/profile/:phone - Get user profile (optional)
-router.get("/profile/:phone", getUserProfile);
+// Protected routes (require authentication)
+router.get("/profile", authenticateToken, getUserProfile);
+router.put("/profile", authenticateToken, updateUserProfile);
+router.put("/change-password", authenticateToken, changePassword);
 
 module.exports = router;
