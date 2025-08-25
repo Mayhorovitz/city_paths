@@ -3,7 +3,7 @@ import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:city_path/screens/destination_search_screen.dart';
 import 'package:city_path/screens/route_results_screen.dart';
-import 'package:city_path/screens/navigation_screen.dart'; // הוספה!
+import 'package:city_path/screens/navigation_screen.dart';
 import 'package:city_path/services/route_service.dart';
 
 class HomeScreen extends StatefulWidget {

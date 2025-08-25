@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:geolocator/geolocator.dart';
+import 'package:city_path/screens/report_hazard_screen.dart';
 import 'dart:async';
 import 'dart:math' as math;
 
@@ -456,6 +457,31 @@ class _NavigationScreenState extends State<NavigationScreen> {
           ),
         ],
       ),
+      floatingActionButton: FloatingActionButton(
+        onPressed: () async {
+          final result = await Navigator.push(
+            context,
+            MaterialPageRoute(builder: (_) => const ReportHazardScreen()),
+          );
+
+          if (result == true) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text(
+                  'Report submitted! Thank you for helping keep routes safe.',
+                ),
+                backgroundColor: Colors.green,
+                duration: Duration(seconds: 3),
+              ),
+            );
+          }
+        },
+        backgroundColor: Colors.red.shade600,
+        foregroundColor: Colors.white,
+        elevation: 8,
+        child: const Icon(Icons.report_problem, size: 28),
+      ),
+      floatingActionButtonLocation: FloatingActionButtonLocation.endFloat,
     );
   }
 
