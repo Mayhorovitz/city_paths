@@ -3,7 +3,7 @@ const { getLayerData } = require("./mapLayersService");
 // Relevant safety layers
 const LAYERS = ["crime", "lighting", "business", "reports"];
 
-// Weight per layer (positive increases safety, negative decreases)
+// Weight per layer
 const LAYER_WEIGHTS = {
   crime: -1, // crime lowers the score
   lighting: 1, // lighting improves the score

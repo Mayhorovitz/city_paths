@@ -21,7 +21,7 @@ const storage = multer.diskStorage({
 const upload = multer({
   storage: storage,
   limits: {
-    fileSize: 5 * 1024 * 1024, // 5MB limit
+    fileSize: 5 * 1024 * 1024,
   },
   fileFilter: (req, file, cb) => {
     const allowedTypes = /jpeg|jpg|png|webp/;
@@ -46,10 +46,9 @@ const submitReport = async (req, res) => {
       req.body;
 
     // Validation
-    if (!category || !description || !urgencyLevel || !latitude || !longitude) {
+    if (!category || !urgencyLevel || !latitude || !longitude) {
       return res.status(400).json({
-        error:
-          "Category, description, urgency level, and location are required",
+        error: "Category, urgency level, and location are required",
       });
     }
 
@@ -86,7 +85,7 @@ const submitReport = async (req, res) => {
       return res.status(400).json({ error: "Invalid coordinates" });
     }
 
-    // Check for duplicate reports (same user, same location, same category within 1 hour)
+    // Check for duplicate reports
     const duplicateCheck = await pool.query(
       `SELECT id FROM reports 
        WHERE user_id = $1 AND category = $2 
@@ -178,7 +177,7 @@ const getReportsNearby = async (req, res) => {
       return res.status(400).json({ error: "Invalid coordinates or radius" });
     }
 
-    // Get reports within radius (not expired)
+    // Get reports within radius
     const result = await pool.query(
       `SELECT 
          r.id, r.category, r.description, r.urgency_level,

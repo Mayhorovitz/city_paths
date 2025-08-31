@@ -1,7 +1,7 @@
 // backend\src\controllers\layerController.js
 const pool = require("../db/pool");
 
-// Original function - for Express routes
+// for Express routes
 const getLayerData = async (req, res) => {
   const { type } = req.query;
 
@@ -25,7 +25,6 @@ const getLayerData = async (req, res) => {
   }
 };
 
-// New function - for safety logic usage
 const getLayerDataForSafety = async (layerType) => {
   try {
     const result = await pool.query(
@@ -53,6 +52,6 @@ const getLayerDataForSafety = async (layerType) => {
 };
 
 module.exports = {
-  getLayerData, // Express middleware
-  getLayerDataForSafety, // For safety code logic
+  getLayerData,
+  getLayerDataForSafety,
 };

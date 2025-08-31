@@ -25,7 +25,6 @@ async function getOpenBusinesses(lat, lng) {
   }
 
   try {
-    // Single API call instead of 4 separate calls
     const url = `https://maps.googleapis.com/maps/api/place/nearbysearch/json`;
     const params = {
       location: `${lat},${lng}`,

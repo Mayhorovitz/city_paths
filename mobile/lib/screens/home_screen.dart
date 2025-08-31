@@ -1,10 +1,12 @@
+// lib/screens/home_screen.dart
 import 'package:flutter/material.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
-import 'package:geolocator/geolocator.dart';
 import 'package:city_path/screens/destination_search_screen.dart';
 import 'package:city_path/screens/route_results_screen.dart';
 import 'package:city_path/screens/navigation_screen.dart';
 import 'package:city_path/services/route_service.dart';
+import 'package:city_path/services/location_service.dart';
+import 'package:city_path/services/map_report_service.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -20,79 +22,76 @@ class _HomeScreenState extends State<HomeScreen> {
   GoogleMapController? _mapController;
   Set<Marker> _markers = {};
   Set<Polyline> _polylines = {};
-  Map<String, dynamic>?
-  _selectedRouteData; // Store selected route for navigation
+  Map<String, dynamic>? _selectedRouteData;
 
-  // Current location - will be updated with real GPS coordinates
+  // Current location
   List<double>? _currentLocation;
+  bool _loadingReports = false;
 
   @override
   void initState() {
     super.initState();
-    _getCurrentLocation();
+    _initializeLocation();
   }
 
-  // Get user's current location
-  Future<void> _getCurrentLocation() async {
+  Future<void> _initializeLocation() async {
+    final location = await LocationService.getCurrentLocation();
+    setState(() {
+      _currentLocation = location;
+    });
+
+    if (_mapController != null && _currentLocation != null) {
+      _mapController!.animateCamera(
+        CameraUpdate.newLatLng(
+          LatLng(_currentLocation![0], _currentLocation![1]),
+        ),
+      );
+    }
+
+    _loadNearbyReports();
+  }
+
+  Future<void> _loadNearbyReports() async {
+    if (_currentLocation == null) return;
+
+    setState(() {
+      _loadingReports = true;
+    });
+
     try {
-      // Check if location services are enabled
-      bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
-      if (!serviceEnabled) {
-        // Location services are not enabled, use default location (Tel Aviv)
-        setState(() {
-          _currentLocation = [32.0853, 34.7818];
-        });
-        return;
-      }
-
-      // Check location permissions
-      LocationPermission permission = await Geolocator.checkPermission();
-      if (permission == LocationPermission.denied) {
-        permission = await Geolocator.requestPermission();
-        if (permission == LocationPermission.denied) {
-          // Permissions are denied, use default location
-          setState(() {
-            _currentLocation = [32.0853, 34.7818];
-          });
-          return;
-        }
-      }
-
-      if (permission == LocationPermission.deniedForever) {
-        // Permissions are denied forever, use default location
-        setState(() {
-          _currentLocation = [32.0853, 34.7818];
-        });
-        return;
-      }
-
-      // Get current position
-      Position position = await Geolocator.getCurrentPosition(
-        desiredAccuracy: LocationAccuracy.high,
+      final reportMarkers = await MapReportService.getReportMarkersNearby(
+        latitude: _currentLocation![0],
+        longitude: _currentLocation![1],
+        radiusKm: 2.0,
+        onReportTap: _showReportDetails,
       );
 
       setState(() {
-        _currentLocation = [position.latitude, position.longitude];
-      });
-
-      // Update map camera to current location
-      if (_mapController != null) {
-        _mapController!.animateCamera(
-          CameraUpdate.newLatLng(LatLng(position.latitude, position.longitude)),
+        // Remove old report markers, keep others
+        _markers.removeWhere(
+          (marker) => marker.markerId.value.startsWith('report_'),
         );
-      }
+        _markers.addAll(reportMarkers);
+        _loadingReports = false;
+      });
     } catch (e) {
-      print("Error getting current location: $e");
-      // Use default location if error occurs
+      print("Error loading reports: $e");
       setState(() {
-        _currentLocation = [32.0853, 34.7818];
+        _loadingReports = false;
       });
     }
   }
 
+  void _showReportDetails(Map<String, dynamic> report) {
+    MapReportService.showReportDetailsBottomSheet(
+      context: context,
+      report: report,
+      isInNavigation: false,
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
-    // Show loading if current location is not available yet
     if (_currentLocation == null) {
       return const Scaffold(
         backgroundColor: Color(0xFFF9F2E9),
@@ -106,6 +105,23 @@ class _HomeScreenState extends State<HomeScreen> {
         backgroundColor: Colors.teal,
         title: const Text('City Path', style: TextStyle(color: Colors.white)),
         centerTitle: true,
+        actions: [
+          IconButton(
+            onPressed: _loadingReports ? null : _loadNearbyReports,
+            icon:
+                _loadingReports
+                    ? const SizedBox(
+                      width: 20,
+                      height: 20,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: Colors.white,
+                      ),
+                    )
+                    : const Icon(Icons.refresh, color: Colors.white),
+            tooltip: 'Refresh Reports',
+          ),
+        ],
       ),
       body: Padding(
         padding: const EdgeInsets.all(16.0),
@@ -119,9 +135,8 @@ class _HomeScreenState extends State<HomeScreen> {
                     target: LatLng(_currentLocation![0], _currentLocation![1]),
                     zoom: 14,
                   ),
-                  onMapCreated: (controller) async {
+                  onMapCreated: (controller) {
                     _mapController = controller;
-                    // Note: Crime layer loading removed as requested
                   },
                   myLocationEnabled: true,
                   myLocationButtonEnabled: true,
@@ -132,194 +147,171 @@ class _HomeScreenState extends State<HomeScreen> {
               ),
             ),
             const SizedBox(height: 16),
-            TextField(
-              readOnly: true,
-              decoration: InputDecoration(
-                prefixIcon: const Icon(Icons.search, color: Colors.black54),
-                hintText: _selectedDestination ?? 'Where would you like to go?',
-                hintStyle: const TextStyle(color: Colors.black54),
-                filled: true,
-                fillColor: const Color(0xFFF9F2E9),
-                contentPadding: const EdgeInsets.symmetric(
-                  vertical: 18,
-                  horizontal: 20,
-                ),
-                enabledBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(16),
-                  borderSide: BorderSide(color: Colors.grey.shade300, width: 1),
-                ),
-                focusedBorder: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(16),
-                  borderSide: BorderSide(
-                    color: Colors.teal.shade300,
-                    width: 1.5,
-                  ),
-                ),
-              ),
-              onTap: () async {
-                final selected = await Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (_) => const DestinationSearchScreen(),
-                  ),
-                );
-
-                if (selected != null && selected is Map) {
-                  setState(() {
-                    _selectedDestination = selected["address"];
-                    _selectedLatLng = List<double>.from(selected["latlng"]);
-                  });
-
-                  if (_selectedLatLng != null) {
-                    // Show loading dialog
-                    showDialog(
-                      context: context,
-                      barrierDismissible: false,
-                      builder: (BuildContext context) {
-                        return const Center(child: CircularProgressIndicator());
-                      },
-                    );
-
-                    try {
-                      // Call server to get routes from current location to destination
-                      final routeData = await RouteService.fetchSafeRoutes(
-                        origin: _currentLocation!,
-                        destination: _selectedLatLng!,
-                      );
-
-                      // Close loading dialog
-                      Navigator.of(context).pop();
-
-                      // Extract routes from response
-                      final List<Map<String, dynamic>> routes =
-                          List<Map<String, dynamic>>.from(
-                            routeData['routes'] ?? [],
-                          );
-
-                      if (routes.isNotEmpty) {
-                        // Navigate to route results screen
-                        final result = await Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder:
-                                (_) => RouteResultsScreen(
-                                  routes: routes,
-                                  destinationAddress: _selectedDestination!,
-                                ),
-                          ),
-                        );
-
-                        // Handle the result from route results screen
-                        if (result != null && result is Map) {
-                          final action = result['action'];
-                          final selectedRoute = result['route'];
-
-                          if (action == 'select') {
-                            // User wants to see route on map
-                            _displaySelectedRoute(selectedRoute);
-                            // Store route data for potential navigation
-                            _selectedRouteData = selectedRoute;
-                          } else if (action == 'navigate') {
-                            // User wants to start navigation
-                            Navigator.push(
-                              context,
-                              MaterialPageRoute(
-                                builder:
-                                    (_) => NavigationScreen(
-                                      selectedRoute: selectedRoute,
-                                      destinationAddress: _selectedDestination!,
-                                    ),
-                              ),
-                            );
-                          }
-                        }
-                      } else {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(
-                            content: Text(
-                              'No routes found for this destination',
-                            ),
-                          ),
-                        );
-                      }
-                    } catch (e) {
-                      // Close loading dialog
-                      Navigator.of(context).pop();
-
-                      print("Failed to fetch routes: $e");
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(
-                          content: Text('Failed to calculate routes: $e'),
-                        ),
-                      );
-                    }
-                  }
-                }
-              },
-            ),
-
-            // Show navigation button if a route is selected
+            _buildSearchField(),
             if (_selectedRouteData != null) ...[
               const SizedBox(height: 12),
-              Container(
-                width: double.infinity,
-                child: ElevatedButton.icon(
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.blue,
-                    foregroundColor: Colors.white,
-                    padding: const EdgeInsets.symmetric(vertical: 16),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(16),
-                    ),
-                    elevation: 4,
-                  ),
-                  onPressed: () {
-                    // Start navigation with selected route
-                    Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder:
-                            (_) => NavigationScreen(
-                              selectedRoute: _selectedRouteData!,
-                              destinationAddress: _selectedDestination!,
-                            ),
-                      ),
-                    );
-                  },
-                  icon: const Icon(Icons.navigation, size: 24),
-                  label: Text(
-                    'Start Navigation to ${_selectedDestination ?? 'Destination'}',
-                    style: const TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                ),
-              ),
+              _buildNavigationButton(),
             ],
           ],
         ),
       ),
-      bottomNavigationBar: BottomNavigationBar(
-        selectedItemColor: Colors.teal,
-        unselectedItemColor: Colors.grey,
-        backgroundColor: Colors.white,
-        currentIndex: _selectedIndex,
-        onTap: (index) {
-          setState(() {
-            _selectedIndex = index;
-          });
+      bottomNavigationBar: _buildBottomNavigationBar(),
+    );
+  }
+
+  Widget _buildSearchField() {
+    return TextField(
+      readOnly: true,
+      decoration: InputDecoration(
+        prefixIcon: const Icon(Icons.search, color: Colors.black54),
+        hintText: _selectedDestination ?? 'Where would you like to go?',
+        hintStyle: const TextStyle(color: Colors.black54),
+        filled: true,
+        fillColor: const Color(0xFFF9F2E9),
+        contentPadding: const EdgeInsets.symmetric(
+          vertical: 18,
+          horizontal: 20,
+        ),
+        enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(16),
+          borderSide: BorderSide(color: Colors.grey.shade300, width: 1),
+        ),
+        focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(16),
+          borderSide: BorderSide(color: Colors.teal.shade300, width: 1.5),
+        ),
+      ),
+      onTap: _handleDestinationSearch,
+    );
+  }
+
+  Widget _buildNavigationButton() {
+    return SizedBox(
+      width: double.infinity,
+      child: ElevatedButton.icon(
+        style: ElevatedButton.styleFrom(
+          backgroundColor: Colors.blue,
+          foregroundColor: Colors.white,
+          padding: const EdgeInsets.symmetric(vertical: 16),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+          ),
+          elevation: 4,
+        ),
+        onPressed: () {
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder:
+                  (_) => NavigationScreen(
+                    selectedRoute: _selectedRouteData!,
+                    destinationAddress: _selectedDestination!,
+                  ),
+            ),
+          );
         },
-        items: const [
-          BottomNavigationBarItem(icon: Icon(Icons.map), label: 'Map'),
-          BottomNavigationBarItem(icon: Icon(Icons.report), label: 'Reports'),
-          BottomNavigationBarItem(icon: Icon(Icons.person), label: 'Profile'),
-        ],
+        icon: const Icon(Icons.navigation, size: 24),
+        label: Text(
+          'Start Navigation to ${_selectedDestination ?? 'Destination'}',
+          style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+        ),
       ),
     );
   }
 
-  // Display the selected route on the map
+  Widget _buildBottomNavigationBar() {
+    return BottomNavigationBar(
+      selectedItemColor: Colors.teal,
+      unselectedItemColor: Colors.grey,
+      backgroundColor: Colors.white,
+      currentIndex: _selectedIndex,
+      onTap: (index) {
+        setState(() {
+          _selectedIndex = index;
+        });
+      },
+      items: const [
+        BottomNavigationBarItem(icon: Icon(Icons.map), label: 'Map'),
+        BottomNavigationBarItem(icon: Icon(Icons.report), label: 'Reports'),
+        BottomNavigationBarItem(icon: Icon(Icons.person), label: 'Profile'),
+      ],
+    );
+  }
+
+  Future<void> _handleDestinationSearch() async {
+    final selected = await Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => const DestinationSearchScreen()),
+    );
+
+    if (selected != null && selected is Map) {
+      setState(() {
+        _selectedDestination = selected["address"];
+        _selectedLatLng = List<double>.from(selected["latlng"]);
+      });
+
+      if (_selectedLatLng != null) {
+        _showLoadingDialog();
+
+        try {
+          final routeData = await RouteService.fetchSafeRoutes(
+            origin: _currentLocation!,
+            destination: _selectedLatLng!,
+          );
+
+          Navigator.of(context).pop();
+
+          final routes = List<Map<String, dynamic>>.from(
+            routeData['routes'] ?? [],
+          );
+
+          if (routes.isNotEmpty) {
+            final result = await Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder:
+                    (_) => RouteResultsScreen(
+                      routes: routes,
+                      destinationAddress: _selectedDestination!,
+                    ),
+              ),
+            );
+
+            if (result != null && result is Map) {
+              _handleRouteResult(result);
+            }
+          } else {
+            _showSnackBar('No routes found for this destination');
+          }
+        } catch (e) {
+          Navigator.of(context).pop();
+          _showSnackBar('Failed to calculate routes: $e');
+        }
+      }
+    }
+  }
+
+  void _handleRouteResult(Map result) {
+    final action = result['action'];
+    final selectedRoute = result['route'];
+
+    if (action == 'select') {
+      _displaySelectedRoute(selectedRoute);
+      _selectedRouteData = selectedRoute;
+    } else if (action == 'navigate') {
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder:
+              (_) => NavigationScreen(
+                selectedRoute: selectedRoute,
+                destinationAddress: _selectedDestination!,
+              ),
+        ),
+      );
+    }
+  }
+
   void _displaySelectedRoute(Map<String, dynamic> selectedRoute) {
     try {
       final List<dynamic> path = selectedRoute['path'] ?? [];
@@ -328,7 +320,6 @@ class _HomeScreenState extends State<HomeScreen> {
         final polylinePoints =
             path.map<LatLng>((coord) => LatLng(coord[0], coord[1])).toList();
 
-        // Route color based on safety level
         Color routeColor = _getRouteColor(selectedRoute['score'] ?? 0);
 
         setState(() {
@@ -343,8 +334,10 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
           };
 
-          // Clear existing markers and add destination marker
-          _markers.clear();
+          // Remove old destination marker and add new one
+          _markers.removeWhere(
+            (marker) => marker.markerId.value == 'destination',
+          );
           if (_selectedLatLng != null) {
             _markers.add(
               Marker(
@@ -362,48 +355,24 @@ class _HomeScreenState extends State<HomeScreen> {
           }
         });
 
-        // Focus on the route
         if (polylinePoints.isNotEmpty && _mapController != null) {
           _fitMapToRoute(polylinePoints);
         }
 
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Route selected! Safety: ${selectedRoute['score']}%'),
-            action: SnackBarAction(
-              label: 'Navigate',
-              onPressed: () {
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder:
-                        (_) => NavigationScreen(
-                          selectedRoute: selectedRoute,
-                          destinationAddress: _selectedDestination!,
-                        ),
-                  ),
-                );
-              },
-            ),
-          ),
-        );
+        _showSnackBar('Route selected! Safety: ${selectedRoute['score']}%');
       }
     } catch (e) {
       print("Error displaying route: $e");
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Error displaying route on map')),
-      );
+      _showSnackBar('Error displaying route on map');
     }
   }
 
-  // Determine route color based on safety score
   Color _getRouteColor(int score) {
     if (score >= 80) return Colors.green;
     if (score >= 60) return Colors.orange;
     return Colors.red;
   }
 
-  // Fit map camera to show the entire route
   void _fitMapToRoute(List<LatLng> points) {
     if (points.isEmpty || _mapController == null) return;
 
@@ -425,8 +394,24 @@ class _HomeScreenState extends State<HomeScreen> {
           southwest: LatLng(minLat, minLng),
           northeast: LatLng(maxLat, maxLng),
         ),
-        100.0, // padding
+        100.0,
       ),
     );
+  }
+
+  void _showLoadingDialog() {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (BuildContext context) {
+        return const Center(child: CircularProgressIndicator());
+      },
+    );
+  }
+
+  void _showSnackBar(String message) {
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(message)));
   }
 }

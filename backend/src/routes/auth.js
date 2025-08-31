@@ -13,7 +13,7 @@ const {
 router.post("/register", registerUser);
 router.post("/login", loginUser);
 
-// Protected routes (require authentication)
+// Protected routes
 router.get("/profile", authenticateToken, getUserProfile);
 router.put("/profile", authenticateToken, updateUserProfile);
 router.put("/change-password", authenticateToken, changePassword);

@@ -184,11 +184,6 @@ class _ReportHazardScreenState extends State<ReportHazardScreen> {
       return;
     }
 
-    if (_descriptionController.text.trim().isEmpty) {
-      _showSnackBar('Please add a description', isError: true);
-      return;
-    }
-
     if (_currentLocation == null) {
       _showSnackBar('Location not available. Please try again.', isError: true);
       return;

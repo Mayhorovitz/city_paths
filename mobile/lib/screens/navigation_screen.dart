@@ -1,9 +1,12 @@
+// lib/screens/navigation_screen.dart
 import 'package:flutter/material.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:city_path/screens/report_hazard_screen.dart';
+import 'package:city_path/services/location_service.dart';
+import 'package:city_path/services/navigation_service.dart';
+import 'package:city_path/services/map_report_service.dart';
 import 'dart:async';
-import 'dart:math' as math;
 
 class NavigationScreen extends StatefulWidget {
   final Map<String, dynamic> selectedRoute;
@@ -22,20 +25,11 @@ class NavigationScreen extends StatefulWidget {
 class _NavigationScreenState extends State<NavigationScreen> {
   GoogleMapController? _mapController;
   StreamSubscription<Position>? _positionStreamSubscription;
+  late NavigationService _navigationService;
 
   // Current user location
   LatLng? _currentLocation;
-
-  // Route data
-  List<LatLng> _routePoints = [];
-  int _currentStepIndex = 0;
-
-  // Navigation state
-  String _currentInstruction = "Starting navigation...";
-  String _nextInstruction = "";
-  double _distanceToNextStep = 0.0;
-  double _totalDistanceRemaining = 0.0;
-  int _estimatedTimeRemaining = 0; // in minutes
+  Set<Marker> _markers = {};
 
   // Map settings
   double _currentZoom = 18.0;
@@ -44,7 +38,8 @@ class _NavigationScreenState extends State<NavigationScreen> {
   @override
   void initState() {
     super.initState();
-    _initializeRoute();
+    _navigationService = NavigationService();
+    _initializeNavigation();
     _startLocationTracking();
   }
 
@@ -54,169 +49,85 @@ class _NavigationScreenState extends State<NavigationScreen> {
     super.dispose();
   }
 
-  // Initialize route from selected route data
-  void _initializeRoute() {
-    final List<dynamic> pathData = widget.selectedRoute['path'] ?? [];
-    _routePoints =
-        pathData.map<LatLng>((coord) => LatLng(coord[0], coord[1])).toList();
+  void _initializeNavigation() {
+    _navigationService.initializeRoute(
+      widget.selectedRoute,
+      widget.destinationAddress,
+    );
+    _addDestinationMarker();
+  }
 
-    if (_routePoints.isNotEmpty) {
-      _currentInstruction = "Head towards ${widget.destinationAddress}";
-      _calculateRemainingDistance();
+  void _addDestinationMarker() {
+    if (_navigationService.routePoints.isNotEmpty) {
+      setState(() {
+        _markers.add(
+          Marker(
+            markerId: const MarkerId('destination'),
+            position: _navigationService.routePoints.last,
+            icon: BitmapDescriptor.defaultMarkerWithHue(
+              BitmapDescriptor.hueRed,
+            ),
+            infoWindow: InfoWindow(
+              title: 'Destination',
+              snippet: widget.destinationAddress,
+            ),
+          ),
+        );
+      });
     }
   }
 
-  // Start real-time location tracking
   void _startLocationTracking() {
-    const LocationSettings locationSettings = LocationSettings(
-      accuracy: LocationAccuracy.high,
-      distanceFilter: 5, // Update every 5 meters
+    _positionStreamSubscription = LocationService.startLocationStream(
+      onLocationUpdate: _handleLocationUpdate,
     );
-
-    _positionStreamSubscription = Geolocator.getPositionStream(
-      locationSettings: locationSettings,
-    ).listen((Position position) {
-      _updateCurrentLocation(position);
-    });
   }
 
-  // Update current location and navigation state
-  void _updateCurrentLocation(Position position) {
+  void _handleLocationUpdate(Position position) {
+    final newLocation = LatLng(position.latitude, position.longitude);
+
     setState(() {
-      _currentLocation = LatLng(position.latitude, position.longitude);
+      _currentLocation = newLocation;
       _currentBearing = position.heading;
     });
 
-    _updateNavigationInstructions();
+    _navigationService.updateLocation(newLocation);
     _updateMapCamera();
+    _loadNearbyReports();
   }
 
-  // Calculate remaining distance and time
-  void _calculateRemainingDistance() {
-    if (_currentLocation == null || _routePoints.isEmpty) return;
+  Future<void> _loadNearbyReports() async {
+    if (_currentLocation == null) return;
 
-    double totalDistance = 0.0;
-
-    // Calculate distance from current location to next step
-    if (_currentStepIndex < _routePoints.length) {
-      totalDistance += Geolocator.distanceBetween(
-        _currentLocation!.latitude,
-        _currentLocation!.longitude,
-        _routePoints[_currentStepIndex].latitude,
-        _routePoints[_currentStepIndex].longitude,
-      );
-    }
-
-    // Add remaining steps
-    for (int i = _currentStepIndex; i < _routePoints.length - 1; i++) {
-      totalDistance += Geolocator.distanceBetween(
-        _routePoints[i].latitude,
-        _routePoints[i].longitude,
-        _routePoints[i + 1].latitude,
-        _routePoints[i + 1].longitude,
-      );
-    }
-
-    setState(() {
-      _totalDistanceRemaining = totalDistance;
-      // Estimate time: average walking speed 5 km/h = 1.39 m/s
-      _estimatedTimeRemaining = (totalDistance / 1.39 / 60).round();
-    });
-  }
-
-  // Update navigation instructions based on current location
-  void _updateNavigationInstructions() {
-    if (_currentLocation == null || _routePoints.isEmpty) return;
-
-    // Check if we're close to the next waypoint
-    if (_currentStepIndex < _routePoints.length) {
-      double distanceToNext = Geolocator.distanceBetween(
-        _currentLocation!.latitude,
-        _currentLocation!.longitude,
-        _routePoints[_currentStepIndex].latitude,
-        _routePoints[_currentStepIndex].longitude,
+    try {
+      final reportMarkers = await MapReportService.getReportMarkersNearby(
+        latitude: _currentLocation!.latitude,
+        longitude: _currentLocation!.longitude,
+        radiusKm: 0.5,
+        onReportTap: _showReportDetails,
       );
 
       setState(() {
-        _distanceToNextStep = distanceToNext;
+        // Keep destination marker, replace report markers
+        final nonReportMarkers =
+            _markers
+                .where((marker) => !marker.markerId.value.startsWith('report_'))
+                .toSet();
+        _markers = nonReportMarkers..addAll(reportMarkers);
       });
-
-      // If close to waypoint, move to next step
-      if (distanceToNext < 20.0 &&
-          _currentStepIndex < _routePoints.length - 1) {
-        _currentStepIndex++;
-        _generateInstructions();
-      }
-    }
-
-    _calculateRemainingDistance();
-  }
-
-  // Generate turn-by-turn instructions
-  void _generateInstructions() {
-    if (_currentStepIndex >= _routePoints.length - 1) {
-      setState(() {
-        _currentInstruction = "You have arrived at your destination!";
-        _nextInstruction = "";
-      });
-      return;
-    }
-
-    // Simple instruction generation (can be enhanced)
-    if (_currentStepIndex == 0) {
-      setState(() {
-        _currentInstruction = "Head towards ${widget.destinationAddress}";
-        _nextInstruction = "Continue straight";
-      });
-    } else if (_currentStepIndex < _routePoints.length - 2) {
-      String direction = _calculateTurnDirection(_currentStepIndex);
-      setState(() {
-        _currentInstruction = direction;
-        _nextInstruction = "Then continue straight";
-      });
-    } else {
-      setState(() {
-        _currentInstruction = "Continue to destination";
-        _nextInstruction = "You're almost there!";
-      });
+    } catch (e) {
+      print("Error loading reports in navigation: $e");
     }
   }
 
-  // Calculate turn direction based on route points
-  String _calculateTurnDirection(int stepIndex) {
-    if (stepIndex < 1 || stepIndex >= _routePoints.length - 1) {
-      return "Continue straight";
-    }
-
-    LatLng prev = _routePoints[stepIndex - 1];
-    LatLng current = _routePoints[stepIndex];
-    LatLng next = _routePoints[stepIndex + 1];
-
-    // Calculate bearings
-    double bearing1 = Geolocator.bearingBetween(
-      prev.latitude,
-      prev.longitude,
-      current.latitude,
-      current.longitude,
+  void _showReportDetails(Map<String, dynamic> report) {
+    MapReportService.showReportDetailsBottomSheet(
+      context: context,
+      report: report,
+      isInNavigation: true,
     );
-    double bearing2 = Geolocator.bearingBetween(
-      current.latitude,
-      current.longitude,
-      next.latitude,
-      next.longitude,
-    );
-
-    double turnAngle = bearing2 - bearing1;
-    if (turnAngle > 180) turnAngle -= 360;
-    if (turnAngle < -180) turnAngle += 360;
-
-    if (turnAngle.abs() < 30) return "Continue straight";
-    if (turnAngle > 30) return "Turn right";
-    if (turnAngle < -30) return "Turn left";
-    return "Continue straight";
   }
 
-  // Update map camera to follow user
   void _updateMapCamera() {
     if (_mapController == null || _currentLocation == null) return;
 
@@ -226,30 +137,10 @@ class _NavigationScreenState extends State<NavigationScreen> {
           target: _currentLocation!,
           zoom: _currentZoom,
           bearing: _currentBearing,
-          tilt: 60.0, // 3D perspective
+          tilt: 60.0,
         ),
       ),
     );
-  }
-
-  // Format distance for display
-  String _formatDistance(double meters) {
-    if (meters < 1000) {
-      return "${meters.round()} m";
-    } else {
-      return "${(meters / 1000).toStringAsFixed(1)} km";
-    }
-  }
-
-  // Format time for display
-  String _formatTime(int minutes) {
-    if (minutes < 60) {
-      return "$minutes min";
-    } else {
-      int hours = minutes ~/ 60;
-      int remainingMinutes = minutes % 60;
-      return "${hours}h ${remainingMinutes}m";
-    }
   }
 
   @override
@@ -258,7 +149,6 @@ class _NavigationScreenState extends State<NavigationScreen> {
       backgroundColor: Colors.black,
       body: Stack(
         children: [
-          // Map
           GoogleMap(
             onMapCreated: (controller) {
               _mapController = controller;
@@ -268,8 +158,8 @@ class _NavigationScreenState extends State<NavigationScreen> {
             },
             initialCameraPosition: CameraPosition(
               target:
-                  _routePoints.isNotEmpty
-                      ? _routePoints.first
+                  _navigationService.routePoints.isNotEmpty
+                      ? _navigationService.routePoints.first
                       : const LatLng(32.0853, 34.7818),
               zoom: _currentZoom,
               bearing: _currentBearing,
@@ -279,213 +169,194 @@ class _NavigationScreenState extends State<NavigationScreen> {
             myLocationEnabled: true,
             myLocationButtonEnabled: false,
             zoomControlsEnabled: false,
+            markers: _markers,
             polylines: {
               Polyline(
                 polylineId: const PolylineId('route'),
-                points: _routePoints,
+                points: _navigationService.routePoints,
                 color: Colors.blue,
                 width: 6,
               ),
             },
-            markers:
-                _routePoints.isNotEmpty
-                    ? {
-                      Marker(
-                        markerId: const MarkerId('destination'),
-                        position: _routePoints.last,
-                        icon: BitmapDescriptor.defaultMarkerWithHue(
-                          BitmapDescriptor.hueRed,
-                        ),
-                      ),
-                    }
-                    : {},
           ),
 
-          // Top instruction panel
-          Positioned(
-            top: MediaQuery.of(context).padding.top + 10,
-            left: 16,
-            right: 16,
-            child: Card(
-              color: Colors.white,
-              elevation: 8,
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: Padding(
-                padding: const EdgeInsets.all(16),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      children: [
-                        Icon(
-                          _getInstructionIcon(_currentInstruction),
-                          size: 32,
-                          color: Colors.blue,
-                        ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                _currentInstruction,
-                                style: const TextStyle(
-                                  fontSize: 18,
-                                  fontWeight: FontWeight.bold,
-                                ),
-                              ),
-                              if (_distanceToNextStep > 0)
-                                Text(
-                                  "in ${_formatDistance(_distanceToNextStep)}",
-                                  style: TextStyle(
-                                    fontSize: 14,
-                                    color: Colors.grey[600],
-                                  ),
-                                ),
-                            ],
-                          ),
-                        ),
-                      ],
-                    ),
-                    if (_nextInstruction.isNotEmpty)
-                      Padding(
-                        padding: const EdgeInsets.only(top: 8),
-                        child: Text(
-                          "Then: $_nextInstruction",
-                          style: TextStyle(
-                            fontSize: 14,
-                            color: Colors.grey[600],
-                          ),
-                        ),
-                      ),
-                  ],
-                ),
-              ),
-            ),
-          ),
-
-          // Bottom info panel
-          Positioned(
-            bottom: 20,
-            left: 16,
-            right: 16,
-            child: Card(
-              color: Colors.white,
-              elevation: 8,
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: Padding(
-                padding: const EdgeInsets.all(16),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceAround,
-                  children: [
-                    Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        const Icon(Icons.access_time, color: Colors.blue),
-                        const SizedBox(height: 4),
-                        Text(
-                          _formatTime(_estimatedTimeRemaining),
-                          style: const TextStyle(
-                            fontSize: 16,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                        const Text(
-                          "Remaining",
-                          style: TextStyle(fontSize: 12, color: Colors.grey),
-                        ),
-                      ],
-                    ),
-                    Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        const Icon(Icons.straighten, color: Colors.green),
-                        const SizedBox(height: 4),
-                        Text(
-                          _formatDistance(_totalDistanceRemaining),
-                          style: const TextStyle(
-                            fontSize: 16,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                        const Text(
-                          "Distance",
-                          style: TextStyle(fontSize: 12, color: Colors.grey),
-                        ),
-                      ],
-                    ),
-                    Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        const Icon(Icons.flag, color: Colors.red),
-                        const SizedBox(height: 4),
-                        Text(
-                          "${_routePoints.length - _currentStepIndex}",
-                          style: const TextStyle(
-                            fontSize: 16,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                        const Text(
-                          "Steps left",
-                          style: TextStyle(fontSize: 12, color: Colors.grey),
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          ),
-
-          // Exit button
-          Positioned(
-            top: MediaQuery.of(context).padding.top + 10,
-            left: 16,
-            child: Card(
-              color: Colors.white,
-              shape: const CircleBorder(),
-              child: IconButton(
-                icon: const Icon(Icons.close),
-                onPressed: () => Navigator.pop(context),
-              ),
-            ),
-          ),
+          _buildInstructionPanel(),
+          _buildInfoPanel(),
+          _buildExitButton(),
         ],
       ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: () async {
-          final result = await Navigator.push(
-            context,
-            MaterialPageRoute(builder: (_) => const ReportHazardScreen()),
-          );
-
-          if (result == true) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(
-                content: Text(
-                  'Report submitted! Thank you for helping keep routes safe.',
-                ),
-                backgroundColor: Colors.green,
-                duration: Duration(seconds: 3),
-              ),
-            );
-          }
-        },
-        backgroundColor: Colors.red.shade600,
-        foregroundColor: Colors.white,
-        elevation: 8,
-        child: const Icon(Icons.report_problem, size: 28),
-      ),
+      floatingActionButton: _buildReportButton(),
       floatingActionButtonLocation: FloatingActionButtonLocation.endFloat,
     );
   }
 
-  // Get appropriate icon for instruction
+  Widget _buildInstructionPanel() {
+    return Positioned(
+      top: MediaQuery.of(context).padding.top + 10,
+      left: 16,
+      right: 16,
+      child: Card(
+        color: Colors.white,
+        elevation: 8,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Icon(
+                    _getInstructionIcon(_navigationService.currentInstruction),
+                    size: 32,
+                    color: Colors.blue,
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          _navigationService.currentInstruction,
+                          style: const TextStyle(
+                            fontSize: 18,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                        if (_navigationService.distanceToNextStep > 0)
+                          Text(
+                            "in ${LocationService.formatDistance(_navigationService.distanceToNextStep)}",
+                            style: TextStyle(
+                              fontSize: 14,
+                              color: Colors.grey[600],
+                            ),
+                          ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+              if (_navigationService.nextInstruction.isNotEmpty)
+                Padding(
+                  padding: const EdgeInsets.only(top: 8),
+                  child: Text(
+                    "Then: ${_navigationService.nextInstruction}",
+                    style: TextStyle(fontSize: 14, color: Colors.grey[600]),
+                  ),
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildInfoPanel() {
+    return Positioned(
+      bottom: 20,
+      left: 16,
+      right: 16,
+      child: Card(
+        color: Colors.white,
+        elevation: 8,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.spaceAround,
+            children: [
+              _buildInfoColumn(
+                Icons.access_time,
+                Colors.blue,
+                LocationService.formatTime(
+                  _navigationService.estimatedTimeRemaining,
+                ),
+                "Remaining",
+              ),
+              _buildInfoColumn(
+                Icons.straighten,
+                Colors.green,
+                LocationService.formatDistance(
+                  _navigationService.totalDistanceRemaining,
+                ),
+                "Distance",
+              ),
+              _buildInfoColumn(
+                Icons.flag,
+                Colors.red,
+                "${_navigationService.routePoints.length - _navigationService.currentStepIndex}",
+                "Steps left",
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildInfoColumn(
+    IconData icon,
+    Color color,
+    String value,
+    String label,
+  ) {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(icon, color: color),
+        const SizedBox(height: 4),
+        Text(
+          value,
+          style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+        ),
+        Text(label, style: const TextStyle(fontSize: 12, color: Colors.grey)),
+      ],
+    );
+  }
+
+  Widget _buildExitButton() {
+    return Positioned(
+      top: MediaQuery.of(context).padding.top + 10,
+      left: 16,
+      child: Card(
+        color: Colors.white,
+        shape: const CircleBorder(),
+        child: IconButton(
+          icon: const Icon(Icons.close),
+          onPressed: () => Navigator.pop(context),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildReportButton() {
+    return FloatingActionButton(
+      onPressed: () async {
+        final result = await Navigator.push(
+          context,
+          MaterialPageRoute(builder: (_) => const ReportHazardScreen()),
+        );
+
+        if (result == true) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text(
+                'Report submitted! Thank you for helping keep routes safe.',
+              ),
+              backgroundColor: Colors.green,
+              duration: Duration(seconds: 3),
+            ),
+          );
+          _loadNearbyReports();
+        }
+      },
+      backgroundColor: Colors.red.shade600,
+      foregroundColor: Colors.white,
+      elevation: 8,
+      child: const Icon(Icons.report_problem, size: 28),
+    );
+  }
+
   IconData _getInstructionIcon(String instruction) {
     if (instruction.contains("right")) return Icons.turn_right;
     if (instruction.contains("left")) return Icons.turn_left;
