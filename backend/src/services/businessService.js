@@ -29,7 +29,7 @@ async function getOpenBusinesses(lat, lng) {
     const params = {
       location: `${lat},${lng}`,
       radius: RADIUS_METERS,
-      type: "establishment", // Gets all business types in one call
+      type: "establishment", 
       key: GOOGLE_API_KEY,
       opennow: true,
     };

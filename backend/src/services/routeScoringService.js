@@ -1,13 +1,14 @@
 // routeScoringService.js
 const { getLayerDataForSafety } = require("./mapLayersService");
 const { getOpenBusinesses } = require("./businessService");
+const pool = require("../db/pool");
 
-// Layer weights
+// Updated layer weights
 const LAYER_WEIGHTS = {
-  lighting: 0.45, // Street lighting – 45%
-  business: 0.35, // Business density – 35%
+  lighting: 0.3, // Street lighting – 30%
+  business: 0.25, // Business density – 25%
   crime: 0.2, // Crime data – 20%
-  reports: 0, // Live user reports – 0%
+  reports: 0.25, // Live user reports – 25%
 };
 
 const SEARCH_RADIUS_KM = 0.1; // 100m for all layers
@@ -16,6 +17,40 @@ const SAMPLE_DISTANCE_KM = 0.1; // 100m sampling interval
 let cachedSafetyData = null;
 let cacheTimestamp = 0;
 const CACHE_DURATION = 3 * 60 * 60 * 1000; // 3 hours
+
+// Get live user reports from database
+const getActiveReports = async () => {
+  try {
+    const result = await pool.query(`
+      SELECT 
+        category,
+        urgency_level,
+        latitude,
+        longitude,
+        upvotes,
+        downvotes,
+        created_at
+      FROM reports 
+      WHERE is_active = true 
+        AND expires_at > NOW()
+        AND created_at > NOW() - INTERVAL '7 days'
+      ORDER BY created_at DESC
+    `);
+
+    return result.rows.map((row) => ({
+      category: row.category,
+      urgencyLevel: row.urgency_level,
+      latitude: parseFloat(row.latitude),
+      longitude: parseFloat(row.longitude),
+      upvotes: row.upvotes,
+      downvotes: row.downvotes,
+      createdAt: row.created_at,
+    }));
+  } catch (error) {
+    console.warn("Failed to get active reports:", error.message);
+    return [];
+  }
+};
 
 const buildSafetyGrid = async () => {
   const now = Date.now();
@@ -26,8 +61,9 @@ const buildSafetyGrid = async () => {
   console.log("Building safety grid...");
   const grid = new Map();
 
+  // Process traditional layers (lighting, business, crime)
   for (const [layer, weight] of Object.entries(LAYER_WEIGHTS)) {
-    if (weight === 0) continue; // Skip layers with 0 weight
+    if (weight === 0 || layer === "reports") continue; // Skip reports here, handle separately
 
     try {
       const features = await getLayerDataForSafety(layer);
@@ -47,14 +83,12 @@ const buildSafetyGrid = async () => {
           const level = feature.properties?.level || "medium";
           const levelMultiplier = getLevelMultiplier(level);
 
-          // For crime  store the severity weighted count
           if (layer === "crime") {
             if (!grid.get(gridKey).scores[layer]) {
               grid.get(gridKey).scores[layer] = 0;
             }
             grid.get(gridKey).scores[layer] += levelMultiplier;
           } else {
-            // For lighting and business, store the weighted score as before
             const score = weight * levelMultiplier;
             grid.get(gridKey).scores[layer] = score;
           }
@@ -66,39 +100,108 @@ const buildSafetyGrid = async () => {
     }
   }
 
+  // Process user reports
+  if (LAYER_WEIGHTS.reports > 0) {
+    try {
+      const reports = await getActiveReports();
+      console.log(`Processing ${reports.length} user reports`);
+
+      for (const report of reports) {
+        const {
+          latitude,
+          longitude,
+          category,
+          urgencyLevel,
+          upvotes,
+          downvotes,
+        } = report;
+
+        if (isNaN(latitude) || isNaN(longitude)) continue;
+
+        const gridKey = `${Math.floor(latitude * 1000)}_${Math.floor(
+          longitude * 1000
+        )}`;
+        if (!grid.has(gridKey)) {
+          grid.set(gridKey, { lat: latitude, lng: longitude, scores: {} });
+        }
+
+        // Calculate report impact score
+        const reportImpact = calculateReportImpact(
+          category,
+          urgencyLevel,
+          upvotes,
+          downvotes
+        );
+
+        if (!grid.get(gridKey).scores.reports) {
+          grid.get(gridKey).scores.reports = 0;
+        }
+
+        // Accumulate negative reports (reduce safety score)
+        grid.get(gridKey).scores.reports += reportImpact;
+      }
+    } catch (error) {
+      console.warn("Failed to process user reports:", error.message);
+    }
+  }
+
   cachedSafetyData = grid;
   cacheTimestamp = now;
   console.log(`Safety grid built with ${grid.size} points`);
   return grid;
 };
 
-// Calculate total route distance in kilometers
-const calculateRouteDistance = (path) => {
-  if (!path || path.length < 2) return 0;
+// Calculate impact of a user report on safety score
+const calculateReportImpact = (category, urgencyLevel, upvotes, downvotes) => {
+  // Base impact by category (negative impact = reduces safety)
+  const categoryImpact = {
+    poor_lighting: -1.0,
+    suspicious_gathering: -1.5,
+    road_hazard: -1.2,
+    violence_assault: -2.0,
+    harassment: -1.8,
+    police_security: 1.5, // Positive impact
+  };
 
-  let totalDistance = 0;
-  for (let i = 1; i < path.length; i++) {
-    totalDistance += haversineDistance(
-      path[i - 1][0],
-      path[i - 1][1],
-      path[i][0],
-      path[i][1]
-    );
+  // Urgency multiplier
+  const urgencyMultiplier = {
+    low: 0.5,
+    medium: 1.0,
+    high: 1.8,
+  };
+
+  // Verification score based on upvotes/downvotes
+  const totalVotes = upvotes + downvotes;
+  let verificationMultiplier = 1.0;
+
+  if (totalVotes >= 3) {
+    const upvoteRatio = upvotes / totalVotes;
+    if (upvoteRatio >= 0.7) {
+      verificationMultiplier = 1.5; // Well-verified reports have more impact
+    } else if (upvoteRatio <= 0.3) {
+      verificationMultiplier = 0.3; // Disputed reports have less impact
+    }
   }
-  return totalDistance;
+
+  const baseImpact = categoryImpact[category] || -1.0;
+  const urgency = urgencyMultiplier[urgencyLevel] || 1.0;
+
+  return baseImpact * urgency * verificationMultiplier;
 };
 
-// Collect route data without scoring (for relative normalization)
+// Collect route data including reports
 const collectRouteData = async (path) => {
   if (!path || path.length < 2) {
     return {
       lightingCount: 0,
       businessCount: 0,
       crimeCount: 0,
+      reportsCount: 0,
       routeLengthKm: 0,
       lightingDensity: 0,
       businessDensity: 0,
       crimeDensity: 0,
+      reportsDensity: 0,
     };
   }
 
@@ -115,6 +218,7 @@ const collectRouteData = async (path) => {
   let totalBusinessCount = 0;
   let totalLightingCount = 0;
   let totalCrimeCount = 0;
+  let totalReportsImpact = 0;
   let businessAPICallsMade = 0;
 
   for (const [lat, lng] of sampledPath) {
@@ -135,6 +239,19 @@ const collectRouteData = async (path) => {
     );
     totalCrimeCount += crimeWeightedCount;
 
+    // Count user reports impact
+    const nearbyReportsScores = findNearbyScores(
+      lat,
+      lng,
+      safetyGrid,
+      "reports"
+    );
+    const reportsImpact = nearbyReportsScores.reduce(
+      (sum, score) => sum + Math.abs(score),
+      0
+    );
+    totalReportsImpact += reportsImpact;
+
     // Count businesses (with cache)
     try {
       const businessesGeo = await getOpenBusinesses(lat, lng);
@@ -145,27 +262,31 @@ const collectRouteData = async (path) => {
     }
   }
 
-  // Calculate densities (features per kilometer)
+  // Calculate densities
   const lightingDensity =
     routeLengthKm > 0 ? totalLightingCount / routeLengthKm : 0;
   const businessDensity =
     routeLengthKm > 0 ? totalBusinessCount / routeLengthKm : 0;
   const crimeDensity = routeLengthKm > 0 ? totalCrimeCount / routeLengthKm : 0;
+  const reportsDensity =
+    routeLengthKm > 0 ? totalReportsImpact / routeLengthKm : 0;
 
   return {
     lightingCount: totalLightingCount,
     businessCount: totalBusinessCount,
     crimeCount: totalCrimeCount,
+    reportsCount: Math.round(totalReportsImpact * 10) / 10,
     routeLengthKm: Math.round(routeLengthKm * 1000) / 1000,
     lightingDensity: Math.round(lightingDensity * 100) / 100,
     businessDensity: Math.round(businessDensity * 100) / 100,
     crimeDensity: Math.round(crimeDensity * 100) / 100,
+    reportsDensity: Math.round(reportsDensity * 100) / 100,
     sampledPoints: sampledPath.length,
     apiCallsMade: businessAPICallsMade,
   };
 };
 
-// Score multiple routes with relative normalization
+// Score multiple routes with relative normalization including reports
 const scoreRoutes = async (allRoutesPaths) => {
   if (!allRoutesPaths || allRoutesPaths.length === 0) {
     return [];
@@ -188,36 +309,48 @@ const scoreRoutes = async (allRoutesPaths) => {
     ...routesData.map((r) => r.businessDensity)
   );
   const maxCrimeDensity = Math.max(...routesData.map((r) => r.crimeDensity));
+  const maxReportsDensity = Math.max(
+    ...routesData.map((r) => r.reportsDensity)
+  );
 
   // Calculate scores with relative normalization
   const scoredRoutes = routesData.map((routeData, index) => {
     const lightingScore =
       maxLightingDensity > 0
         ? (routeData.lightingDensity / maxLightingDensity) * 100
-        : 0;
+        : 50;
 
     const businessScore =
       maxBusinessDensity > 0
         ? (routeData.businessDensity / maxBusinessDensity) * 100
-        : 0;
+        : 50;
 
-    // Crime score is INVERTED - higher crime density = lower score
+    // Crime score is INVERTED
     const crimeScore =
       maxCrimeDensity > 0
         ? 100 - (routeData.crimeDensity / maxCrimeDensity) * 100
+        : 100;
+
+    // Reports score is INVERTED
+    const reportsScore =
+      maxReportsDensity > 0
+        ? 100 - (routeData.reportsDensity / maxReportsDensity) * 100
         : 100;
 
     // Calculate weighted final score
     const finalScore = Math.round(
       lightingScore * LAYER_WEIGHTS.lighting +
         businessScore * LAYER_WEIGHTS.business +
-        crimeScore * LAYER_WEIGHTS.crime
+        crimeScore * LAYER_WEIGHTS.crime +
+        reportsScore * LAYER_WEIGHTS.reports
     );
 
     console.log(
       `Route ${index + 1} scored: ${finalScore}% (L:${Math.round(
         lightingScore
-      )}% B:${Math.round(businessScore)}% C:${Math.round(crimeScore)}%)`
+      )}% B:${Math.round(businessScore)}% C:${Math.round(
+        crimeScore
+      )}% R:${Math.round(reportsScore)}%)`
     );
 
     return {
@@ -225,6 +358,7 @@ const scoreRoutes = async (allRoutesPaths) => {
       lightingScore: Math.round(lightingScore * 100) / 100,
       businessScore: Math.round(businessScore * 100) / 100,
       crimeScore: Math.round(crimeScore * 100) / 100,
+      reportsScore: Math.round(reportsScore * 100) / 100,
       score: finalScore,
       breakdown: {
         lightingContribution:
@@ -233,6 +367,8 @@ const scoreRoutes = async (allRoutesPaths) => {
           Math.round(businessScore * LAYER_WEIGHTS.business * 100) / 100,
         crimeContribution:
           Math.round(crimeScore * LAYER_WEIGHTS.crime * 100) / 100,
+        reportsContribution:
+          Math.round(reportsScore * LAYER_WEIGHTS.reports * 100) / 100,
       },
     };
   });
@@ -240,7 +376,23 @@ const scoreRoutes = async (allRoutesPaths) => {
   return scoredRoutes;
 };
 
-// Path sampling (every X kilometers)
+// Calculate total route distance in kilometers
+const calculateRouteDistance = (path) => {
+  if (!path || path.length < 2) return 0;
+
+  let totalDistance = 0;
+  for (let i = 1; i < path.length; i++) {
+    totalDistance += haversineDistance(
+      path[i - 1][0],
+      path[i - 1][1],
+      path[i][0],
+      path[i][1]
+    );
+  }
+  return totalDistance;
+};
+
+// Path sampling
 const samplePath = (path, intervalKm) => {
   if (path.length <= 2) return path;
 
@@ -301,7 +453,7 @@ const findNearbyScores = (lat, lng, safetyGrid, layer) => {
   return scores;
 };
 
-// Multiplier for severity/level string
+// Multiplier for severity
 const getLevelMultiplier = (level) => {
   switch (level?.toLowerCase()) {
     case "low":

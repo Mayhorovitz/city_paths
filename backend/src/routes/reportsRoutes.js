@@ -10,7 +10,7 @@ const {
 } = require("../controllers/reportsController");
 const { authenticateToken } = require("../controllers/authController");
 
-// Protected routes (require authentication)
+// Protected routes 
 router.post("/submit", authenticateToken, upload.single("image"), submitReport);
 router.get("/my-reports", authenticateToken, getUserReports);
 router.post("/:reportId/vote", authenticateToken, voteOnReport);
