@@ -1,7 +1,13 @@
+// backend/src/controllers/reportsController.js
 const pool = require("../db/pool");
 const multer = require("multer");
 const path = require("path");
 const fs = require("fs");
+const {
+  updateUserReputation,
+  processVote,
+  getUserReputationInfo,
+} = require("../services/reputationService");
 
 // Configure multer for file uploads
 const storage = multer.diskStorage({
@@ -20,9 +26,7 @@ const storage = multer.diskStorage({
 
 const upload = multer({
   storage: storage,
-  limits: {
-    fileSize: 5 * 1024 * 1024,
-  },
+  limits: { fileSize: 5 * 1024 * 1024 },
   fileFilter: (req, file, cb) => {
     const allowedTypes = /jpeg|jpg|png|webp/;
     const extname = allowedTypes.test(
@@ -52,7 +56,6 @@ const submitReport = async (req, res) => {
       });
     }
 
-    // Validate category
     const validCategories = [
       "poor_lighting",
       "suspicious_gathering",
@@ -65,13 +68,11 @@ const submitReport = async (req, res) => {
       return res.status(400).json({ error: "Invalid category" });
     }
 
-    // Validate urgency level
     const validUrgencyLevels = ["low", "medium", "high"];
     if (!validUrgencyLevels.includes(urgencyLevel.toLowerCase())) {
       return res.status(400).json({ error: "Invalid urgency level" });
     }
 
-    // Validate coordinates
     const lat = parseFloat(latitude);
     const lng = parseFloat(longitude);
     if (
@@ -131,6 +132,27 @@ const submitReport = async (req, res) => {
 
     const report = result.rows[0];
 
+    // Update user reputation for creating a report
+    try {
+      const reputationUpdate = await updateUserReputation(
+        userId,
+        "REPORT_CREATED",
+        report.id
+      );
+      console.log(
+        `User ${userId} gained reputation for report:`,
+        reputationUpdate
+      );
+    } catch (repError) {
+      console.error("Error updating reputation:", repError);
+    }
+
+    // Update user's total_reports count
+    await pool.query(
+      "UPDATE users SET total_reports = total_reports + 1 WHERE id = $1",
+      [userId]
+    );
+
     console.log(
       `New report submitted by user ${userId}: ${category} at ${lat},${lng}`
     );
@@ -177,13 +199,13 @@ const getReportsNearby = async (req, res) => {
       return res.status(400).json({ error: "Invalid coordinates or radius" });
     }
 
-    // Get reports within radius
+    // Get reports with user reputation info
     const result = await pool.query(
       `SELECT 
          r.id, r.category, r.description, r.urgency_level,
          r.latitude, r.longitude, r.image_path, r.created_at,
          r.upvotes, r.downvotes, r.is_verified,
-         u.first_name, u.last_name
+         u.first_name, u.last_name, u.reputation_score, u.badge_level
        FROM reports r
        JOIN users u ON r.user_id = u.id
        WHERE ST_DWithin(
@@ -211,6 +233,8 @@ const getReportsNearby = async (req, res) => {
       downvotes: row.downvotes,
       isVerified: row.is_verified,
       reporterName: `${row.first_name} ${row.last_name.charAt(0)}.`,
+      reporterReputation: row.reputation_score,
+      reporterBadge: row.badge_level,
     }));
 
     res.status(200).json({
@@ -221,6 +245,57 @@ const getReportsNearby = async (req, res) => {
   } catch (err) {
     console.error("Error fetching nearby reports:", err);
     res.status(500).json({ error: "Failed to fetch nearby reports" });
+  }
+};
+
+// Vote on a report
+const voteOnReport = async (req, res) => {
+  try {
+    const userId = req.user.userId;
+    const { reportId } = req.params;
+    const { vote } = req.body;
+
+    if (!vote || !["up", "down"].includes(vote)) {
+      return res.status(400).json({ error: "Vote must be 'up' or 'down'" });
+    }
+
+    // Check if report exists
+    const reportCheck = await pool.query(
+      `SELECT id, user_id FROM reports WHERE id = $1 AND is_active = true`,
+      [reportId]
+    );
+
+    if (reportCheck.rows.length === 0) {
+      return res.status(404).json({ error: "Report not found" });
+    }
+
+    const report = reportCheck.rows[0];
+
+    // Users can't vote on their own reports
+    if (report.user_id === userId) {
+      return res.status(403).json({ error: "Cannot vote on your own report" });
+    }
+
+    // Process vote using reputation system
+    const voteResult = await processVote(userId, reportId, vote);
+
+    console.log(`User ${userId} voted ${vote} on report ${reportId}`);
+
+    res.status(200).json({
+      success: true,
+      message: `Vote recorded successfully`,
+      report: {
+        id: reportId,
+        upvotes: voteResult.upvotes,
+        downvotes: voteResult.downvotes,
+        weightedUpvotes: voteResult.weightedUpvotes,
+        weightedDownvotes: voteResult.weightedDownvotes,
+      },
+      reputationUpdate: voteResult.reputationUpdate,
+    });
+  } catch (err) {
+    console.error("Error voting on report:", err);
+    res.status(500).json({ error: "Failed to record vote" });
   }
 };
 
@@ -266,123 +341,20 @@ const getUserReports = async (req, res) => {
   }
 };
 
-// Vote on a report (for verification)
-const voteOnReport = async (req, res) => {
+// Get user reputation info
+const getUserReputationInfo = async (req, res) => {
   try {
     const userId = req.user.userId;
-    const { reportId } = req.params;
-    const { vote } = req.body;
 
-    if (!vote || !["up", "down"].includes(vote)) {
-      return res.status(400).json({ error: "Vote must be 'up' or 'down'" });
-    }
-
-    // Check if report exists
-    const reportCheck = await pool.query(
-      `SELECT id, user_id, upvotes, downvotes FROM reports WHERE id = $1 AND is_active = true`,
-      [reportId]
-    );
-
-    if (reportCheck.rows.length === 0) {
-      return res.status(404).json({ error: "Report not found" });
-    }
-
-    const report = reportCheck.rows[0];
-
-    // Users can't vote on their own reports
-    if (report.user_id === userId) {
-      return res.status(403).json({ error: "Cannot vote on your own report" });
-    }
-
-    // Check if user already voted
-    const existingVote = await pool.query(
-      `SELECT vote_type FROM report_votes WHERE report_id = $1 AND user_id = $2`,
-      [reportId, userId]
-    );
-
-    let updateQuery;
-    let updateParams;
-
-    if (existingVote.rows.length > 0) {
-      // Update existing vote
-      const oldVote = existingVote.rows[0].vote_type;
-
-      if (oldVote === vote) {
-        return res
-          .status(400)
-          .json({ error: "You have already voted this way" });
-      }
-
-      // Update the vote
-      await pool.query(
-        `UPDATE report_votes SET vote_type = $1, updated_at = NOW() 
-         WHERE report_id = $2 AND user_id = $3`,
-        [vote, reportId, userId]
-      );
-
-      // Update report counters
-      if (oldVote === "up" && vote === "down") {
-        updateQuery = `UPDATE reports SET upvotes = upvotes - 1, downvotes = downvotes + 1 WHERE id = $1 RETURNING upvotes, downvotes`;
-      } else if (oldVote === "down" && vote === "up") {
-        updateQuery = `UPDATE reports SET upvotes = upvotes + 1, downvotes = downvotes - 1 WHERE id = $1 RETURNING upvotes, downvotes`;
-      }
-      updateParams = [reportId];
-    } else {
-      // Insert new vote
-      await pool.query(
-        `INSERT INTO report_votes (report_id, user_id, vote_type, created_at)
-         VALUES ($1, $2, $3, NOW())`,
-        [reportId, userId, vote]
-      );
-
-      // Update report counters
-      if (vote === "up") {
-        updateQuery = `UPDATE reports SET upvotes = upvotes + 1 WHERE id = $1 RETURNING upvotes, downvotes`;
-      } else {
-        updateQuery = `UPDATE reports SET downvotes = downvotes + 1 WHERE id = $1 RETURNING upvotes, downvotes`;
-      }
-      updateParams = [reportId];
-    }
-
-    const updateResult = await pool.query(updateQuery, updateParams);
-    const updatedReport = updateResult.rows[0];
-
-    // Check if report should be verified or flagged
-    const totalVotes = updatedReport.upvotes + updatedReport.downvotes;
-    if (totalVotes >= 5) {
-      const ratio = updatedReport.upvotes / totalVotes;
-      let verificationUpdate = "";
-
-      if (ratio >= 0.7) {
-        // 70% upvotes = verified
-        verificationUpdate = "is_verified = true";
-      } else if (ratio <= 0.3) {
-        // 30% or less upvotes = flag as questionable
-        verificationUpdate = "is_active = false";
-      }
-
-      if (verificationUpdate) {
-        await pool.query(
-          `UPDATE reports SET ${verificationUpdate} WHERE id = $1`,
-          [reportId]
-        );
-      }
-    }
-
-    console.log(`User ${userId} voted ${vote} on report ${reportId}`);
+    const reputationInfo = await getUserReputationInfo(userId);
 
     res.status(200).json({
       success: true,
-      message: `Vote recorded successfully`,
-      report: {
-        id: reportId,
-        upvotes: updatedReport.upvotes,
-        downvotes: updatedReport.downvotes,
-      },
+      reputation: reputationInfo,
     });
   } catch (err) {
-    console.error("Error voting on report:", err);
-    res.status(500).json({ error: "Failed to record vote" });
+    console.error("Error fetching user reputation:", err);
+    res.status(500).json({ error: "Failed to fetch reputation info" });
   }
 };
 
@@ -395,7 +367,8 @@ const getReportStats = async (req, res) => {
         COUNT(*) as count,
         AVG(CASE WHEN urgency_level = 'high' THEN 3 
                  WHEN urgency_level = 'medium' THEN 2 
-                 ELSE 1 END) as avg_urgency
+                 ELSE 1 END) as avg_urgency,
+        AVG(upvotes::float / GREATEST(upvotes + downvotes, 1)) as avg_vote_ratio
       FROM reports 
       WHERE created_at > NOW() - INTERVAL '30 days'
         AND is_active = true
@@ -418,6 +391,7 @@ const getReportStats = async (req, res) => {
           category: row.category,
           count: parseInt(row.count),
           avgUrgency: parseFloat(row.avg_urgency).toFixed(2),
+          avgVoteRatio: parseFloat(row.avg_vote_ratio).toFixed(2),
         })),
       },
     });
@@ -432,6 +406,7 @@ module.exports = {
   getReportsNearby,
   getUserReports,
   voteOnReport,
+  getUserReputationInfo,
   getReportStats,
   upload,
 };

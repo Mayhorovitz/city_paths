@@ -141,6 +141,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   myLocationEnabled: true,
                   myLocationButtonEnabled: true,
                   zoomControlsEnabled: false,
+                  mapToolbarEnabled: false,
                   markers: _markers,
                   polylines: _polylines,
                 ),
