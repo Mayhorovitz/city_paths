@@ -6,6 +6,7 @@ const {
   getUserReports,
   voteOnReport,
   getReportStats,
+  getReputationInfo,
   upload,
 } = require("../controllers/reportsController");
 const { authenticateToken } = require("../controllers/authController");
@@ -14,7 +15,7 @@ const { authenticateToken } = require("../controllers/authController");
 router.post("/submit", authenticateToken, upload.single("image"), submitReport);
 router.get("/my-reports", authenticateToken, getUserReports);
 router.post("/:reportId/vote", authenticateToken, voteOnReport);
-router.get("/reputation", authenticateToken, getUserReputationInfo);
+router.get("/reputation", authenticateToken, getReputationInfo);
 
 // Public routes
 router.get("/nearby", getReportsNearby);

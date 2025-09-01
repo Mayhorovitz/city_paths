@@ -25,6 +25,9 @@ app.use("/api/routes", routeRoutes);
 const reportRoutes = require("./routes/reportsRoutes");
 app.use("/api/reports", reportRoutes);
 
+const usersRoutes = require("./routes/usersRoutes");
+app.use("/api/users", usersRoutes);
+
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, "0.0.0.0", () => {
   console.log(`Server running on port ${PORT}`);

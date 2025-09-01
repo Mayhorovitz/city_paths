@@ -145,6 +145,7 @@ const submitReport = async (req, res) => {
       );
     } catch (repError) {
       console.error("Error updating reputation:", repError);
+      // Don't fail the request if reputation update fails
     }
 
     // Update user's total_reports count
@@ -342,7 +343,7 @@ const getUserReports = async (req, res) => {
 };
 
 // Get user reputation info
-const getUserReputationInfo = async (req, res) => {
+const getReputationInfo = async (req, res) => {
   try {
     const userId = req.user.userId;
 
@@ -406,7 +407,7 @@ module.exports = {
   getReportsNearby,
   getUserReports,
   voteOnReport,
-  getUserReputationInfo,
+  getReputationInfo,
   getReportStats,
   upload,
 };
