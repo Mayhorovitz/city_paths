@@ -1,7 +1,10 @@
+// lib/services/auth_service.dart
+
 import 'package:http/http.dart' as http;
 import 'dart:convert';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../utils.dart';
+import 'package:flutter/material.dart' show Color, IconData, Icons, Colors;
 
 class AuthService {
   // Register new user
@@ -32,7 +35,6 @@ class AuthService {
       final data = jsonDecode(response.body);
 
       if (response.statusCode == 201) {
-        // Save token to local storage
         if (data['token'] != null) {
           await _saveToken(data['token']);
         }
@@ -83,7 +85,6 @@ class AuthService {
       final data = jsonDecode(response.body);
 
       if (response.statusCode == 200) {
-        // Save token to local storage
         if (data['token'] != null) {
           await _saveToken(data['token']);
         }
@@ -124,9 +125,9 @@ class AuthService {
     }
   }
 
-  // Get user profile
+  // Get user profile with reputation info
   static Future<Map<String, dynamic>> getUserProfile() async {
-    final url = Uri.parse('${ApiConfig.baseUrl}/api/auth/profile');
+    final url = Uri.parse('${ApiConfig.baseUrl}/api/users/profile');
 
     try {
       final token = await _getToken();
@@ -151,7 +152,7 @@ class AuthService {
       if (response.statusCode == 200) {
         return {"success": true, "user": data['user']};
       } else if (response.statusCode == 401 || response.statusCode == 403) {
-        await _clearToken(); // Clear invalid token
+        await _clearToken();
         return {
           "success": false,
           "error": "unauthorized",
@@ -166,6 +167,85 @@ class AuthService {
       }
     } catch (e) {
       print("Profile fetch error: $e");
+      return {
+        "success": false,
+        "error": "network_error",
+        "message": "Network error occurred",
+      };
+    }
+  }
+
+  // Get reputation details
+  static Future<Map<String, dynamic>> getReputationDetails() async {
+    final url = Uri.parse('${ApiConfig.baseUrl}/api/users/reputation');
+
+    try {
+      final token = await _getToken();
+      if (token == null) {
+        return {
+          "success": false,
+          "error": "no_token",
+          "message": "Please log in again",
+        };
+      }
+
+      final response = await http.get(
+        url,
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": "Bearer $token",
+        },
+      );
+
+      final data = jsonDecode(response.body);
+
+      if (response.statusCode == 200) {
+        return {
+          "success": true,
+          "reputationDetails": data['reputationDetails'],
+        };
+      } else {
+        return {
+          "success": false,
+          "error": "fetch_failed",
+          "message": data['error'] ?? 'Failed to fetch reputation details',
+        };
+      }
+    } catch (e) {
+      print("Reputation fetch error: $e");
+      return {
+        "success": false,
+        "error": "network_error",
+        "message": "Network error occurred",
+      };
+    }
+  }
+
+  // Get leaderboard
+  static Future<Map<String, dynamic>> getLeaderboard({int limit = 20}) async {
+    final url = Uri.parse(
+      '${ApiConfig.baseUrl}/api/users/leaderboard?limit=$limit',
+    );
+
+    try {
+      final response = await http.get(url);
+      final data = jsonDecode(response.body);
+
+      if (response.statusCode == 200) {
+        return {
+          "success": true,
+          "leaderboard": data['leaderboard'],
+          "count": data['count'],
+        };
+      } else {
+        return {
+          "success": false,
+          "error": "fetch_failed",
+          "message": data['error'] ?? 'Failed to fetch leaderboard',
+        };
+      }
+    } catch (e) {
+      print("Leaderboard fetch error: $e");
       return {
         "success": false,
         "error": "network_error",
@@ -336,7 +416,6 @@ class AuthService {
   }
 
   static bool isValidPhone(String phone) {
-    // Israeli phone validation
     return RegExp(
       r'^(\+972|0)?[5-9]\d{8}$',
     ).hasMatch(phone.replaceAll(RegExp(r'[-\s]'), ''));
@@ -344,5 +423,51 @@ class AuthService {
 
   static bool isValidPassword(String password) {
     return password.length >= 6;
+  }
+
+  // Helper methods for badge display
+  static String getBadgeDisplayName(String badgeLevel) {
+    switch (badgeLevel) {
+      case 'newcomer':
+        return 'New Reporter';
+      case 'regular':
+        return 'Regular Reporter';
+      case 'trusted':
+        return 'Trusted Reporter';
+      case 'expert':
+        return 'Expert Reporter';
+      default:
+        return 'Reporter';
+    }
+  }
+
+  static Color getBadgeColor(String badgeLevel) {
+    switch (badgeLevel) {
+      case 'newcomer':
+        return Colors.grey;
+      case 'regular':
+        return Colors.blue;
+      case 'trusted':
+        return Colors.green;
+      case 'expert':
+        return Colors.purple;
+      default:
+        return Colors.grey;
+    }
+  }
+
+  static IconData getBadgeIcon(String badgeLevel) {
+    switch (badgeLevel) {
+      case 'newcomer':
+        return Icons.star_border;
+      case 'regular':
+        return Icons.star_half;
+      case 'trusted':
+        return Icons.star;
+      case 'expert':
+        return Icons.stars;
+      default:
+        return Icons.star_border;
+    }
   }
 }

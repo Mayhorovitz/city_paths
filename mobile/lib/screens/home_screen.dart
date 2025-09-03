@@ -7,6 +7,7 @@ import 'package:city_path/screens/navigation_screen.dart';
 import 'package:city_path/services/route_service.dart';
 import 'package:city_path/services/location_service.dart';
 import 'package:city_path/services/map_report_service.dart';
+import 'package:city_path/screens/profile_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -227,9 +228,17 @@ class _HomeScreenState extends State<HomeScreen> {
       backgroundColor: Colors.white,
       currentIndex: _selectedIndex,
       onTap: (index) {
-        setState(() {
-          _selectedIndex = index;
-        });
+        if (index == 2) {
+          // Profile tab
+          Navigator.push(
+            context,
+            MaterialPageRoute(builder: (_) => const ProfileScreen()),
+          );
+        } else {
+          setState(() {
+            _selectedIndex = index;
+          });
+        }
       },
       items: const [
         BottomNavigationBarItem(icon: Icon(Icons.map), label: 'Map'),

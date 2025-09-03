@@ -195,30 +195,33 @@ const getReportsNearby = async (req, res) => {
     const latitude = parseFloat(lat);
     const longitude = parseFloat(lng);
     const radiusKm = parseFloat(radius);
-
+    if (isNaN(radiusKm) || radiusKm <= 0) {
+      return res.status(400).json({ error: "Invalid radius value" });
+    }
     if (isNaN(latitude) || isNaN(longitude) || isNaN(radiusKm)) {
       return res.status(400).json({ error: "Invalid coordinates or radius" });
     }
+    const radiusMeters = Math.round(radiusKm * 1000);
 
     // Get reports with user reputation info
     const result = await pool.query(
       `SELECT 
-         r.id, r.category, r.description, r.urgency_level,
-         r.latitude, r.longitude, r.image_path, r.created_at,
-         r.upvotes, r.downvotes, r.is_verified,
-         u.first_name, u.last_name, u.reputation_score, u.badge_level
-       FROM reports r
-       JOIN users u ON r.user_id = u.id
-       WHERE ST_DWithin(
-         ST_MakePoint($1, $2)::geography,
-         ST_MakePoint(r.longitude, r.latitude)::geography,
-         $3 * 1000
-       )
-       AND r.expires_at > NOW()
-       AND r.is_active = true
-       ORDER BY r.created_at DESC
-       LIMIT 100`,
-      [longitude, latitude, radiusKm]
+     r.id, r.category, r.description, r.urgency_level,
+     r.latitude, r.longitude, r.image_path, r.created_at,
+     r.upvotes, r.downvotes, r.is_verified,
+     u.first_name, u.last_name, u.reputation_score, u.badge_level
+   FROM reports r
+   JOIN users u ON r.user_id = u.id
+   WHERE ST_DWithin(
+     ST_MakePoint($1, $2)::geography,
+     ST_MakePoint(r.longitude, r.latitude)::geography,
+     $3
+   )
+   AND r.expires_at > NOW()
+   AND r.is_active = true
+   ORDER BY r.created_at DESC
+   LIMIT 100`,
+      [longitude, latitude, radiusMeters]
     );
 
     const reports = result.rows.map((row) => ({
@@ -365,11 +368,11 @@ const getReportStats = async (req, res) => {
     const stats = await pool.query(`
       SELECT 
         category,
-        COUNT(*) as count,
+        COUNT(*)::int AS count,
         AVG(CASE WHEN urgency_level = 'high' THEN 3 
-                 WHEN urgency_level = 'medium' THEN 2 
-                 ELSE 1 END) as avg_urgency,
-        AVG(upvotes::float / GREATEST(upvotes + downvotes, 1)) as avg_vote_ratio
+           WHEN urgency_level = 'medium' THEN 2 
+           ELSE 1 END)::float AS avg_urgency,
+        AVG(upvotes::float / GREATEST(upvotes + downvotes, 1))::float AS avg_vote_ratio
       FROM reports 
       WHERE created_at > NOW() - INTERVAL '30 days'
         AND is_active = true

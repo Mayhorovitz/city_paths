@@ -1,8 +1,11 @@
+// lib/services/report_service.dart
+
 import 'dart:convert';
 import 'dart:io';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import '../utils.dart';
+import 'package:flutter/material.dart' show Color, IconData, Icons, Colors;
 
 class ReportService {
   // Submit a new report
@@ -26,20 +29,14 @@ class ReportService {
         };
       }
 
-      // Create multipart request for file upload
       final request = http.MultipartRequest('POST', url);
-
-      // Add headers
       request.headers['Authorization'] = 'Bearer $token';
-
-      // Add form fields
       request.fields['category'] = category;
       request.fields['description'] = description;
       request.fields['urgencyLevel'] = urgencyLevel;
       request.fields['latitude'] = latitude.toString();
       request.fields['longitude'] = longitude.toString();
 
-      // Add image if provided
       if (image != null) {
         final imageFile = await http.MultipartFile.fromPath(
           'image',
@@ -48,7 +45,6 @@ class ReportService {
         request.files.add(imageFile);
       }
 
-      // Send request
       final response = await request.send();
       final responseBody = await response.stream.bytesToString();
       final data = jsonDecode(responseBody);
@@ -117,6 +113,65 @@ class ReportService {
     }
   }
 
+  // Vote on a report
+  static Future<Map<String, dynamic>> voteOnReport({
+    required String reportId,
+    required bool isUpvote,
+  }) async {
+    final url = Uri.parse('${ApiConfig.baseUrl}/api/reports/$reportId/vote');
+
+    try {
+      final token = await _getToken();
+      if (token == null) {
+        return {
+          "success": false,
+          "error": "no_token",
+          "message": "Please log in again",
+        };
+      }
+
+      final response = await http.post(
+        url,
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": "Bearer $token",
+        },
+        body: jsonEncode({"vote": isUpvote ? "up" : "down"}),
+      );
+
+      final data = jsonDecode(response.body);
+
+      if (response.statusCode == 200) {
+        return {
+          "success": true,
+          "message": data['message'] ?? "Vote recorded",
+          "report": data['report'],
+          "reputationUpdate": data['reputationUpdate'],
+        };
+      } else if (response.statusCode == 401 || response.statusCode == 403) {
+        await _clearToken();
+        return {
+          "success": false,
+          "error": "unauthorized",
+          "message": "Please log in again",
+        };
+      } else {
+        return {
+          "success": false,
+          "error": "vote_failed",
+          "message": data['error'] ?? 'Failed to record vote',
+        };
+      }
+    } catch (e) {
+      print("Vote on report error: $e");
+      return {
+        "success": false,
+        "error": "network_error",
+        "message": "Network error occurred",
+      };
+    }
+  }
+
   // Get user's report history
   static Future<Map<String, dynamic>> getUserReports() async {
     final url = Uri.parse('${ApiConfig.baseUrl}/api/reports/my-reports');
@@ -167,62 +222,15 @@ class ReportService {
     }
   }
 
-  // Vote on a report (upvote/downvote for verification)
-  static Future<Map<String, dynamic>> voteOnReport({
-    required String reportId,
-    required bool isUpvote, // true for upvote, false for downvote
-  }) async {
-    final url = Uri.parse('${ApiConfig.baseUrl}/api/reports/$reportId/vote');
+  // Private token management methods
+  static Future<String?> _getToken() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getString('auth_token');
+  }
 
-    try {
-      final token = await _getToken();
-      if (token == null) {
-        return {
-          "success": false,
-          "error": "no_token",
-          "message": "Please log in again",
-        };
-      }
-
-      final response = await http.post(
-        url,
-        headers: {
-          "Content-Type": "application/json",
-          "Authorization": "Bearer $token",
-        },
-        body: jsonEncode({"vote": isUpvote ? "up" : "down"}),
-      );
-
-      final data = jsonDecode(response.body);
-
-      if (response.statusCode == 200) {
-        return {
-          "success": true,
-          "message": data['message'] ?? "Vote recorded",
-          "report": data['report'],
-        };
-      } else if (response.statusCode == 401 || response.statusCode == 403) {
-        await _clearToken();
-        return {
-          "success": false,
-          "error": "unauthorized",
-          "message": "Please log in again",
-        };
-      } else {
-        return {
-          "success": false,
-          "error": "vote_failed",
-          "message": data['error'] ?? 'Failed to record vote',
-        };
-      }
-    } catch (e) {
-      print("Vote on report error: $e");
-      return {
-        "success": false,
-        "error": "network_error",
-        "message": "Network error occurred",
-      };
-    }
+  static Future<void> _clearToken() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove('auth_token');
   }
 
   // Report categories helper
@@ -308,14 +316,27 @@ class ReportService {
     }
   }
 
-  // Private token management methods
-  static Future<String?> _getToken() async {
-    final prefs = await SharedPreferences.getInstance();
-    return prefs.getString('auth_token');
+  // Get reputation color for score
+  static Color getReputationColor(int score) {
+    if (score >= 76) return Colors.purple;
+    if (score >= 51) return Colors.green;
+    if (score >= 26) return Colors.blue;
+    return Colors.grey;
   }
 
-  static Future<void> _clearToken() async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.remove('auth_token');
+  // Get badge icon for level
+  static IconData getBadgeIcon(String badgeLevel) {
+    switch (badgeLevel) {
+      case 'newcomer':
+        return Icons.star_border;
+      case 'regular':
+        return Icons.star_half;
+      case 'trusted':
+        return Icons.star;
+      case 'expert':
+        return Icons.stars;
+      default:
+        return Icons.star_border;
+    }
   }
 }

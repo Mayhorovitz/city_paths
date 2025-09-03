@@ -131,27 +131,27 @@ const getUserReputationDetails = async (req, res) => {
     // Get detailed reputation breakdown
     const reputationBreakdown = await pool.query(
       `SELECT 
-         action_type,
-         COUNT(*) as count,
-         SUM(reputation_change) as total_points
-       FROM user_reputation_log
-       WHERE user_id = $1
-       GROUP BY action_type
-       ORDER BY total_points DESC`,
+        action_type,
+        COUNT(*)::int           AS count,
+        SUM(reputation_change)::int AS total_points
+    FROM user_reputation_log
+    WHERE user_id = $1
+    GROUP BY action_type
+    ORDER BY total_points DESC;`,
       [userId]
     );
 
     // Get monthly reputation trend
     const monthlyTrend = await pool.query(
       `SELECT 
-         DATE_TRUNC('month', created_at) as month,
-         SUM(reputation_change) as points_gained,
-         COUNT(*) as actions
-       FROM user_reputation_log
-       WHERE user_id = $1 
-         AND created_at > NOW() - INTERVAL '6 months'
-       GROUP BY DATE_TRUNC('month', created_at)
-       ORDER BY month DESC`,
+        DATE_TRUNC('month', created_at) AS month,
+        SUM(reputation_change)::int     AS points_gained,
+        COUNT(*)::int                   AS actions
+    FROM user_reputation_log
+    WHERE user_id = $1 
+      AND created_at > NOW() - INTERVAL '6 months'
+    GROUP BY DATE_TRUNC('month', created_at)
+    ORDER BY month DESC`,
       [userId]
     );
 
