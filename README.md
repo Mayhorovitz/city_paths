@@ -22,3 +22,9 @@ It helps people move through cities more safely by suggesting routes optimized f
 - **Maps & Navigation**: Google Maps API
 
 ---
+
+## Documentation
+
+All project documents are available in the [docs](./docs) folder.
+Backend code is located in the [backend](./backend) folder.
+Mobile app source code is in the [mobile](./mobile) folder.
