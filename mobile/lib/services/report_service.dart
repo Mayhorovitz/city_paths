@@ -8,6 +8,26 @@ import '../utils.dart';
 import 'package:flutter/material.dart' show Color, IconData, Icons, Colors;
 
 class ReportService {
+  // Helper method to determine if token should be cleared
+  static bool _shouldClearToken(Map<String, dynamic> responseData) {
+    final error = responseData['error']?.toString().toLowerCase() ?? '';
+    final message = responseData['message']?.toString().toLowerCase() ?? '';
+
+    // Don't clear token for business logic errors
+    if (error.contains('cannot vote on your own report') ||
+        error.contains('already voted') ||
+        message.contains('cannot vote on your own report')) {
+      return false;
+    }
+
+    // Only clear token for actual authentication issues
+    return error.contains('token') ||
+        error.contains('expired') ||
+        error.contains('invalid') ||
+        error.contains('unauthorized') ||
+        message.contains('log in again');
+  }
+
   // Submit a new report
   static Future<Map<String, dynamic>> submitReport({
     required String category,
@@ -56,11 +76,14 @@ class ReportService {
           "report": data['report'],
         };
       } else if (response.statusCode == 401 || response.statusCode == 403) {
-        await _clearToken();
+        if (_shouldClearToken(data)) {
+          print("Clearing token due to auth issue: ${data['error']}");
+          await _clearToken();
+        }
         return {
           "success": false,
           "error": "unauthorized",
-          "message": "Please log in again",
+          "message": data['error'] ?? 'Authentication failed',
         };
       } else {
         return {
@@ -130,6 +153,11 @@ class ReportService {
         };
       }
 
+      print("=== VOTE DEBUG ===");
+      print(
+        "Voting on report $reportId with ${isUpvote ? 'upvote' : 'downvote'}",
+      );
+
       final response = await http.post(
         url,
         headers: {
@@ -138,6 +166,9 @@ class ReportService {
         },
         body: jsonEncode({"vote": isUpvote ? "up" : "down"}),
       );
+
+      print("Vote Response Status: ${response.statusCode}");
+      print("Vote Response Body: ${response.body}");
 
       final data = jsonDecode(response.body);
 
@@ -149,12 +180,24 @@ class ReportService {
           "reputationUpdate": data['reputationUpdate'],
         };
       } else if (response.statusCode == 401 || response.statusCode == 403) {
-        await _clearToken();
-        return {
-          "success": false,
-          "error": "unauthorized",
-          "message": "Please log in again",
-        };
+        // Check if it's a business logic error vs auth error
+        if (_shouldClearToken(data)) {
+          print("Clearing token due to auth issue: ${data['error']}");
+          await _clearToken();
+          return {
+            "success": false,
+            "error": "unauthorized",
+            "message": "Please log in again",
+          };
+        } else {
+          // Business logic error - don't clear token
+          print("Business logic error, keeping token: ${data['error']}");
+          return {
+            "success": false,
+            "error": "vote_failed",
+            "message": data['error'] ?? 'Cannot vote on this report',
+          };
+        }
       } else {
         return {
           "success": false,
@@ -199,11 +242,13 @@ class ReportService {
       if (response.statusCode == 200) {
         return {"success": true, "reports": data['reports'] ?? []};
       } else if (response.statusCode == 401 || response.statusCode == 403) {
-        await _clearToken();
+        if (_shouldClearToken(data)) {
+          await _clearToken();
+        }
         return {
           "success": false,
           "error": "unauthorized",
-          "message": "Please log in again",
+          "message": data['error'] ?? 'Authentication failed',
         };
       } else {
         return {
@@ -231,6 +276,7 @@ class ReportService {
   static Future<void> _clearToken() async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove('auth_token');
+    print("Token cleared from ReportService");
   }
 
   // Report categories helper

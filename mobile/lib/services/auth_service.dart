@@ -7,6 +7,21 @@ import '../utils.dart';
 import 'package:flutter/material.dart' show Color, IconData, Icons, Colors;
 
 class AuthService {
+  // Helper method to determine if token should be cleared
+  static bool _shouldClearToken(Map<String, dynamic> responseData) {
+    final error = responseData['error']?.toString().toLowerCase() ?? '';
+
+    // Only clear token for actual authentication issues
+    return error.contains('token') ||
+        error.contains('expired') ||
+        error.contains('invalid') ||
+        error.contains('unauthorized') ||
+        responseData['message']?.toString().toLowerCase().contains(
+              'log in again',
+            ) ==
+            true;
+  }
+
   // Register new user
   static Future<Map<String, dynamic>> registerUser({
     required String phone,
@@ -131,6 +146,9 @@ class AuthService {
 
     try {
       final token = await _getToken();
+      print("=== AUTH DEBUG: getUserProfile ===");
+      print("Token exists: ${token != null}");
+
       if (token == null) {
         return {
           "success": false,
@@ -147,16 +165,23 @@ class AuthService {
         },
       );
 
+      print("Profile Response Status: ${response.statusCode}");
+      print("Profile Response Body: ${response.body}");
+
       final data = jsonDecode(response.body);
 
       if (response.statusCode == 200) {
         return {"success": true, "user": data['user']};
       } else if (response.statusCode == 401 || response.statusCode == 403) {
-        await _clearToken();
+        // Only clear token if it's actually an auth issue
+        if (_shouldClearToken(data)) {
+          print("Clearing token due to auth issue: ${data['error']}");
+          await _clearToken();
+        }
         return {
           "success": false,
           "error": "unauthorized",
-          "message": "Please log in again",
+          "message": data['error'] ?? 'Authentication failed',
         };
       } else {
         return {
@@ -181,6 +206,9 @@ class AuthService {
 
     try {
       final token = await _getToken();
+      print("=== AUTH DEBUG: getReputationDetails ===");
+      print("Token exists: ${token != null}");
+
       if (token == null) {
         return {
           "success": false,
@@ -197,12 +225,26 @@ class AuthService {
         },
       );
 
+      print("Reputation Response Status: ${response.statusCode}");
+      print("Reputation Response Body: ${response.body}");
+
       final data = jsonDecode(response.body);
 
       if (response.statusCode == 200) {
         return {
           "success": true,
           "reputationDetails": data['reputationDetails'],
+        };
+      } else if (response.statusCode == 401 || response.statusCode == 403) {
+        // Only clear token if it's actually an auth issue
+        if (_shouldClearToken(data)) {
+          print("Clearing token due to auth issue: ${data['error']}");
+          await _clearToken();
+        }
+        return {
+          "success": false,
+          "error": "unauthorized",
+          "message": data['error'] ?? 'Authentication failed',
         };
       } else {
         return {
@@ -216,7 +258,7 @@ class AuthService {
       return {
         "success": false,
         "error": "network_error",
-        "message": "Network error occurred",
+        "message": "Network error occurred: $e",
       };
     }
   }
@@ -249,7 +291,7 @@ class AuthService {
       return {
         "success": false,
         "error": "network_error",
-        "message": "Network error occurred",
+        "message": "Network error occurred: $e",
       };
     }
   }
@@ -297,11 +339,13 @@ class AuthService {
           "user": data['user'],
         };
       } else if (response.statusCode == 401 || response.statusCode == 403) {
-        await _clearToken();
+        if (_shouldClearToken(data)) {
+          await _clearToken();
+        }
         return {
           "success": false,
           "error": "unauthorized",
-          "message": "Please log in again",
+          "message": data['error'] ?? 'Authentication failed',
         };
       } else {
         return {
@@ -360,11 +404,13 @@ class AuthService {
           "message": data['error'] ?? 'Current password is incorrect',
         };
       } else if (response.statusCode == 403) {
-        await _clearToken();
+        if (_shouldClearToken(data)) {
+          await _clearToken();
+        }
         return {
           "success": false,
           "error": "unauthorized",
-          "message": "Please log in again",
+          "message": data['error'] ?? 'Authentication failed',
         };
       } else {
         return {
@@ -398,6 +444,7 @@ class AuthService {
   static Future<void> _saveToken(String token) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString('auth_token', token);
+    print("Token saved successfully");
   }
 
   static Future<String?> _getToken() async {
@@ -408,6 +455,7 @@ class AuthService {
   static Future<void> _clearToken() async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove('auth_token');
+    print("Token cleared");
   }
 
   // Validation helpers
