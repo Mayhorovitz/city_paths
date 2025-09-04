@@ -1,16 +1,24 @@
-# city_paths
+# City Paths
 
-A new Flutter project.
+**City Paths** is a community-powered safety navigation app.  
+It helps people move through cities more safely by suggesting routes optimized for **street lighting, open businesses, crime data, and real-time user reports**.
 
-## Getting Started
+---
 
-This project is a starting point for a Flutter application.
+## Features
 
-A few resources to get you started if this is your first Flutter project:
+- Safe route calculation with multiple alternatives
+- Dynamic **safety scoring** (lighting, businesses, crime, user reports)
+- **User reports**: hazards, poor lighting, suspicious activity
+- Community feedback: route ratings & report validation
 
-- [Lab: Write your first Flutter app](https://docs.flutter.dev/get-started/codelab)
-- [Cookbook: Useful Flutter samples](https://docs.flutter.dev/cookbook)
+---
 
-For help getting started with Flutter development, view the
-[online documentation](https://docs.flutter.dev/), which offers tutorials,
-samples, guidance on mobile development, and a full API reference.
+## Tech Stack
+
+- **Mobile App**: Flutter (Dart)
+- **Backend**: Node.js + Express
+- **Database**: PostgreSQL
+- **Maps & Navigation**: Google Maps API
+
+---

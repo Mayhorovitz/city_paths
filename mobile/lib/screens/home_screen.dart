@@ -228,7 +228,7 @@ class _HomeScreenState extends State<HomeScreen> {
       backgroundColor: Colors.white,
       currentIndex: _selectedIndex,
       onTap: (index) {
-        if (index == 2) {
+        if (index == 1) {
           // Profile tab
           Navigator.push(
             context,
@@ -242,7 +242,6 @@ class _HomeScreenState extends State<HomeScreen> {
       },
       items: const [
         BottomNavigationBarItem(icon: Icon(Icons.map), label: 'Map'),
-        BottomNavigationBarItem(icon: Icon(Icons.report), label: 'Reports'),
         BottomNavigationBarItem(icon: Icon(Icons.person), label: 'Profile'),
       ],
     );
