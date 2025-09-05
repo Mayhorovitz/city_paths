@@ -1,5 +1,8 @@
 const express = require("express");
 const cors = require("cors");
+
+const CleanupService = require("./services/cleanupService");
+
 require("dotenv").config();
 
 const app = express();
@@ -28,7 +31,30 @@ app.use("/api/reports", reportRoutes);
 const usersRoutes = require("./routes/usersRoutes");
 app.use("/api/users", usersRoutes);
 
+const feedbackRoutes = require("./routes/feedbackRoutes");
+app.use("/api/feedback", feedbackRoutes);
+
+// Manual cleanup endpoint (for testing)
+app.get("/api/admin/cleanup", async (req, res) => {
+  try {
+    const result = await CleanupService.performDailyCleanup();
+    res.json({
+      success: true,
+      message: "Cleanup completed successfully",
+      result,
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: "Cleanup failed",
+      details: error.message,
+    });
+  }
+});
+
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, "0.0.0.0", () => {
+  CleanupService.startScheduledCleanup();
+
   console.log(`Server running on port ${PORT}`);
 });
