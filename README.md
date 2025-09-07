@@ -1,6 +1,16 @@
 # City Paths
 
-**City Paths** **City Paths** is a community-powered safety navigation app that helps people move through cities more safely by suggesting routes optimized for street lighting, open businesses, crime data, and real-time user reports.
+**City Paths** is a community-powered safety navigation app that helps people move through cities more safely by suggesting routes optimized for street lighting, open businesses, crime data, and real-time user reports.
+
+---
+
+# Problem
+
+Many people feel unsafe in urban spaces, especially at night or in unfamiliar areas.
+
+# Solution
+
+City Paths computes multiple routes and assigns each a Safety Score based on lighting density, nearby open venues, historical incidents, and live community reports. Users contribute structured reports and post trip feedback that continuously improves the model.
 
 ---
 
