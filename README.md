@@ -26,11 +26,13 @@
 
 ## Project Structure
 
+```
 city_paths/
-├── backend/ # Node.js Express server
-├── mobile/ # Flutter mobile application
+├── backend/    # Node.js Express server
+├── mobile/     # Flutter mobile application
 ├── ml_service/ # Python ML prediction service
-└── docs/ # Project documentation
+└── docs/       # Project documentation
+```
 
 ---
 
