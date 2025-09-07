@@ -1,10 +1,10 @@
-// routeScoringService.js
+// routeScoringService.js - Updated to use user preferences
 const { getLayerDataForSafety } = require("./mapLayersService");
 const { getOpenBusinesses } = require("./businessService");
 const pool = require("../db/pool");
 
-// Updated layer weights
-const LAYER_WEIGHTS = {
+// Default layer weights - used when no user preferences provided
+const DEFAULT_LAYER_WEIGHTS = {
   lighting: 0.3, // Street lighting – 30%
   business: 0.25, // Business density – 25%
   crime: 0.2, // Crime data – 20%
@@ -62,7 +62,7 @@ const buildSafetyGrid = async () => {
   const grid = new Map();
 
   // Process traditional layers (lighting, business, crime)
-  for (const [layer, weight] of Object.entries(LAYER_WEIGHTS)) {
+  for (const [layer, weight] of Object.entries(DEFAULT_LAYER_WEIGHTS)) {
     if (weight === 0 || layer === "reports") continue; // Skip reports here, handle separately
 
     try {
@@ -101,7 +101,7 @@ const buildSafetyGrid = async () => {
   }
 
   // Process user reports
-  if (LAYER_WEIGHTS.reports > 0) {
+  if (DEFAULT_LAYER_WEIGHTS.reports > 0) {
     try {
       const reports = await getActiveReports();
       console.log(`Processing ${reports.length} user reports`);
@@ -286,13 +286,19 @@ const collectRouteData = async (path) => {
   };
 };
 
-// Score multiple routes with relative normalization including reports
-const scoreRoutes = async (allRoutesPaths) => {
+// Score multiple routes with user preferences
+const scoreRoutes = async (allRoutesPaths, userPreferences = null) => {
   if (!allRoutesPaths || allRoutesPaths.length === 0) {
     return [];
   }
 
-  console.log(`Scoring ${allRoutesPaths.length} routes...`);
+  // Use user preferences or default weights
+  const weights = userPreferences || DEFAULT_LAYER_WEIGHTS;
+
+  console.log(
+    `Scoring ${allRoutesPaths.length} routes with preferences:`,
+    weights
+  );
 
   // Collect data for all routes first
   const routesData = await Promise.all(
@@ -313,7 +319,7 @@ const scoreRoutes = async (allRoutesPaths) => {
     ...routesData.map((r) => r.reportsDensity)
   );
 
-  // Calculate scores with relative normalization
+  // Calculate scores with user preferences
   const scoredRoutes = routesData.map((routeData, index) => {
     const lightingScore =
       maxLightingDensity > 0
@@ -337,12 +343,12 @@ const scoreRoutes = async (allRoutesPaths) => {
         ? 100 - (routeData.reportsDensity / maxReportsDensity) * 100
         : 100;
 
-    // Calculate weighted final score
+    // Calculate weighted final score using user preferences
     const finalScore = Math.round(
-      lightingScore * LAYER_WEIGHTS.lighting +
-        businessScore * LAYER_WEIGHTS.business +
-        crimeScore * LAYER_WEIGHTS.crime +
-        reportsScore * LAYER_WEIGHTS.reports
+      lightingScore * weights.lighting +
+        businessScore * weights.business +
+        crimeScore * weights.crime +
+        reportsScore * weights.reports
     );
 
     console.log(
@@ -350,7 +356,11 @@ const scoreRoutes = async (allRoutesPaths) => {
         lightingScore
       )}% B:${Math.round(businessScore)}% C:${Math.round(
         crimeScore
-      )}% R:${Math.round(reportsScore)}%)`
+      )}% R:${Math.round(reportsScore)}%) [Weights: L:${Math.round(
+        weights.lighting * 100
+      )}% B:${Math.round(weights.business * 100)}% C:${Math.round(
+        weights.crime * 100
+      )}% R:${Math.round(weights.reports * 100)}%]`
     );
 
     return {
@@ -360,20 +370,40 @@ const scoreRoutes = async (allRoutesPaths) => {
       crimeScore: Math.round(crimeScore * 100) / 100,
       reportsScore: Math.round(reportsScore * 100) / 100,
       score: finalScore,
+      userWeights: weights, // Include user weights in response
       breakdown: {
         lightingContribution:
-          Math.round(lightingScore * LAYER_WEIGHTS.lighting * 100) / 100,
+          Math.round(lightingScore * weights.lighting * 100) / 100,
         businessContribution:
-          Math.round(businessScore * LAYER_WEIGHTS.business * 100) / 100,
-        crimeContribution:
-          Math.round(crimeScore * LAYER_WEIGHTS.crime * 100) / 100,
+          Math.round(businessScore * weights.business * 100) / 100,
+        crimeContribution: Math.round(crimeScore * weights.crime * 100) / 100,
         reportsContribution:
-          Math.round(reportsScore * LAYER_WEIGHTS.reports * 100) / 100,
+          Math.round(reportsScore * weights.reports * 100) / 100,
       },
     };
   });
 
   return scoredRoutes;
+};
+
+// Score single route with user preferences
+const scoreRoute = async (path, userPreferences = null) => {
+  const routes = await scoreRoutes([path], userPreferences);
+  return (
+    routes[0] || {
+      score: 50,
+      lightingScore: 50,
+      businessScore: 50,
+      crimeScore: 50,
+      reportsScore: 50,
+      breakdown: {
+        lightingContribution: 0,
+        businessContribution: 0,
+        crimeContribution: 0,
+        reportsContribution: 0,
+      },
+    }
+  );
 };
 
 // Calculate total route distance in kilometers
@@ -486,8 +516,9 @@ function toRad(degrees) {
 
 module.exports = {
   scoreRoutes,
+  scoreRoute,
   buildSafetyGrid,
-  LAYER_WEIGHTS,
+  DEFAULT_LAYER_WEIGHTS,
   calculateRouteDistance,
   SAMPLE_DISTANCE_KM,
 };

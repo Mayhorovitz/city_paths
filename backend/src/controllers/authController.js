@@ -2,13 +2,23 @@ const pool = require("../db/pool");
 const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");
 
-const JWT_SECRET =
-  process.env.JWT_SECRET;
+const JWT_SECRET = process.env.JWT_SECRET;
 const SALT_ROUNDS = 12;
 
 // Register new user
 const registerUser = async (req, res) => {
-  const { phone, email, password, firstName, lastName, dateOfBirth } = req.body;
+  const {
+    phone,
+    email,
+    password,
+    firstName,
+    lastName,
+    dateOfBirth,
+    lightingPreference = 0.3,
+    businessPreference = 0.25,
+    crimePreference = 0.2,
+    reportsPreference = 0.25,
+  } = req.body;
 
   // Validation
   if (!phone || !email || !password || !firstName || !lastName) {
@@ -32,6 +42,32 @@ const registerUser = async (req, res) => {
   if (!isValidPhone(phone)) {
     return res.status(400).json({
       error: "Please provide a valid phone number",
+    });
+  }
+
+  // Validate preferences
+  const totalPreferences =
+    lightingPreference +
+    businessPreference +
+    crimePreference +
+    reportsPreference;
+  if (Math.abs(totalPreferences - 1.0) > 0.01) {
+    return res.status(400).json({
+      error: "Safety preferences must sum to 1.0",
+    });
+  }
+
+  // Validate each preference is between 0 and 1
+  if (
+    [
+      lightingPreference,
+      businessPreference,
+      crimePreference,
+      reportsPreference,
+    ].some((pref) => pref < 0 || pref > 1)
+  ) {
+    return res.status(400).json({
+      error: "Each preference must be between 0 and 1",
     });
   }
 
@@ -63,14 +99,28 @@ const registerUser = async (req, res) => {
     // Hash password
     const passwordHash = await bcrypt.hash(password, SALT_ROUNDS);
 
-    // Insert new user
+    // Insert new user with preferences
     const result = await pool.query(
       `
-        INSERT INTO users (phone, email, password_hash, first_name, last_name, date_of_birth, verified, created_at)
-        VALUES ($1, $2, $3, $4, $5, $6, true, NOW())
-        RETURNING id, phone, email, first_name, last_name, created_at
+        INSERT INTO users (phone, email, password_hash, first_name, last_name, date_of_birth, 
+                          lighting_preference, business_preference, crime_preference, reports_preference,
+                          verified, created_at)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, true, NOW())
+        RETURNING id, phone, email, first_name, last_name, 
+                  lighting_preference, business_preference, crime_preference, reports_preference, created_at
         `,
-      [phone, email, passwordHash, firstName, lastName, dateOfBirth || null]
+      [
+        phone,
+        email,
+        passwordHash,
+        firstName,
+        lastName,
+        dateOfBirth || null,
+        lightingPreference,
+        businessPreference,
+        crimePreference,
+        reportsPreference,
+      ]
     );
 
     const newUser = result.rows[0];
@@ -87,7 +137,7 @@ const registerUser = async (req, res) => {
     );
 
     console.log(
-      `New user registered: ${newUser.first_name} ${newUser.last_name} (${newUser.phone})`
+      `New user registered: ${newUser.first_name} ${newUser.last_name} (${newUser.phone}) with custom preferences`
     );
 
     res.status(201).json({
@@ -101,6 +151,12 @@ const registerUser = async (req, res) => {
         firstName: newUser.first_name,
         lastName: newUser.last_name,
         createdAt: newUser.created_at,
+        preferences: {
+          lighting: newUser.lighting_preference,
+          business: newUser.business_preference,
+          crime: newUser.crime_preference,
+          reports: newUser.reports_preference,
+        },
       },
     });
   } catch (err) {
@@ -110,6 +166,14 @@ const registerUser = async (req, res) => {
       return res.status(409).json({
         error: "User already exists",
         message: "This phone number or email is already registered.",
+      });
+    }
+
+    if (err.code === "23514") {
+      // Constraint violation
+      return res.status(400).json({
+        error: "Invalid preferences",
+        message: "Safety preferences must sum to 1.0.",
       });
     }
 
@@ -128,10 +192,11 @@ const loginUser = async (req, res) => {
   }
 
   try {
-    // Find user by phone or email
+    // Find user by phone or email - include preferences
     const result = await pool.query(
       `SELECT id, phone, email, password_hash, first_name, last_name, 
-              is_active, failed_login_attempts, locked_until
+              is_active, failed_login_attempts, locked_until,
+              lighting_preference, business_preference, crime_preference, reports_preference
        FROM users 
        WHERE phone = $1 OR email = $1`,
       [phoneOrEmail]
@@ -225,6 +290,12 @@ const loginUser = async (req, res) => {
         email: user.email,
         firstName: user.first_name,
         lastName: user.last_name,
+        preferences: {
+          lighting: user.lighting_preference,
+          business: user.business_preference,
+          crime: user.crime_preference,
+          reports: user.reports_preference,
+        },
       },
     });
   } catch (err) {
@@ -240,7 +311,8 @@ const getUserProfile = async (req, res) => {
 
     const result = await pool.query(
       `SELECT id, phone, email, first_name, last_name, date_of_birth, 
-              profile_picture, created_at, last_login
+              profile_picture, created_at, last_login,
+              lighting_preference, business_preference, crime_preference, reports_preference
        FROM users 
        WHERE id = $1 AND is_active = true`,
       [userId]
@@ -263,6 +335,12 @@ const getUserProfile = async (req, res) => {
         profilePicture: user.profile_picture,
         createdAt: user.created_at,
         lastLogin: user.last_login,
+        preferences: {
+          lighting: user.lighting_preference,
+          business: user.business_preference,
+          crime: user.crime_preference,
+          reports: user.reports_preference,
+        },
       },
     });
   } catch (err) {
@@ -284,7 +362,8 @@ const updateUserProfile = async (req, res) => {
            date_of_birth = COALESCE($3, date_of_birth),
            profile_picture = COALESCE($4, profile_picture)
        WHERE id = $5 AND is_active = true
-       RETURNING id, phone, email, first_name, last_name, date_of_birth, profile_picture`,
+       RETURNING id, phone, email, first_name, last_name, date_of_birth, profile_picture,
+                 lighting_preference, business_preference, crime_preference, reports_preference`,
       [firstName, lastName, dateOfBirth, profilePicture, userId]
     );
 
@@ -304,11 +383,140 @@ const updateUserProfile = async (req, res) => {
         lastName: user.last_name,
         dateOfBirth: user.date_of_birth,
         profilePicture: user.profile_picture,
+        preferences: {
+          lighting: user.lighting_preference,
+          business: user.business_preference,
+          crime: user.crime_preference,
+          reports: user.reports_preference,
+        },
       },
     });
   } catch (err) {
     console.error("Error updating user profile:", err);
     res.status(500).json({ error: "Error updating profile" });
+  }
+};
+
+// Update user preferences
+const updateUserPreferences = async (req, res) => {
+  try {
+    const userId = req.user.userId;
+    const {
+      lightingPreference,
+      businessPreference,
+      crimePreference,
+      reportsPreference,
+    } = req.body;
+
+    // Validation
+    if (
+      lightingPreference === undefined ||
+      businessPreference === undefined ||
+      crimePreference === undefined ||
+      reportsPreference === undefined
+    ) {
+      return res.status(400).json({
+        error: "All preference values are required",
+      });
+    }
+
+    const totalPreferences =
+      lightingPreference +
+      businessPreference +
+      crimePreference +
+      reportsPreference;
+    if (Math.abs(totalPreferences - 1.0) > 0.01) {
+      return res.status(400).json({
+        error: "Safety preferences must sum to 1.0",
+      });
+    }
+
+    // Validate each preference is between 0 and 1
+    if (
+      [
+        lightingPreference,
+        businessPreference,
+        crimePreference,
+        reportsPreference,
+      ].some((pref) => pref < 0 || pref > 1)
+    ) {
+      return res.status(400).json({
+        error: "Each preference must be between 0 and 1",
+      });
+    }
+
+    const result = await pool.query(
+      `UPDATE users 
+       SET lighting_preference = $1, business_preference = $2, 
+           crime_preference = $3, reports_preference = $4
+       WHERE id = $5 AND is_active = true
+       RETURNING lighting_preference, business_preference, crime_preference, reports_preference`,
+      [
+        lightingPreference,
+        businessPreference,
+        crimePreference,
+        reportsPreference,
+        userId,
+      ]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ error: "User not found" });
+    }
+
+    console.log(`User ${userId} updated safety preferences`);
+
+    res.status(200).json({
+      success: true,
+      message: "Preferences updated successfully",
+      preferences: {
+        lighting: result.rows[0].lighting_preference,
+        business: result.rows[0].business_preference,
+        crime: result.rows[0].crime_preference,
+        reports: result.rows[0].reports_preference,
+      },
+    });
+  } catch (err) {
+    console.error("Error updating preferences:", err);
+
+    if (err.code === "23514") {
+      // Constraint violation
+      return res.status(400).json({
+        error: "Invalid preferences",
+        message: "Safety preferences must sum to 1.0.",
+      });
+    }
+
+    res.status(500).json({ error: "Error updating preferences" });
+  }
+};
+
+// Get available preference presets
+const getPreferencePresets = async (req, res) => {
+  try {
+    const result = await pool.query(
+      `SELECT name, description, lighting_weight, business_weight, crime_weight, reports_weight
+       FROM user_preference_presets 
+       WHERE is_active = true
+       ORDER BY name`
+    );
+
+    res.status(200).json({
+      success: true,
+      presets: result.rows.map((preset) => ({
+        name: preset.name,
+        description: preset.description,
+        weights: {
+          lighting: preset.lighting_weight,
+          business: preset.business_weight,
+          crime: preset.crime_weight,
+          reports: preset.reports_weight,
+        },
+      })),
+    });
+  } catch (err) {
+    console.error("Error fetching preference presets:", err);
+    res.status(500).json({ error: "Error fetching preference presets" });
   }
 };
 
@@ -409,6 +617,8 @@ module.exports = {
   loginUser,
   getUserProfile,
   updateUserProfile,
+  updateUserPreferences,
+  getPreferencePresets,
   changePassword,
   authenticateToken,
 };

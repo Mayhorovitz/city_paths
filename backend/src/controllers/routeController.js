@@ -1,10 +1,11 @@
-// routeController.js - Updated to use the new scoring system
+// routeController.js
 const { getRoutesFromGoogle } = require("../services/googleDirectionsService");
 const { scoreRoute, scoreRoutes } = require("../services/routeScoringService");
+const pool = require("../db/pool");
 
-// POST /route/calculate - calculates and scores multiple routes
+// POST /route/calculate - calculates and scores multiple routes with user preferences
 const calculateRoute = async (req, res) => {
-  const { origin, destination } = req.body;
+  const { origin, destination, userId } = req.body;
 
   // Input validation
   if (
@@ -21,6 +22,53 @@ const calculateRoute = async (req, res) => {
   }
 
   try {
+    // Get user preferences if userId provided
+    let userPreferences = {
+      lighting: 0.3,
+      business: 0.25,
+      crime: 0.2,
+      reports: 0.25,
+    };
+
+    let preferencesSource = "default";
+
+    if (userId) {
+      try {
+        const userResult = await pool.query(
+          `SELECT lighting_preference, business_preference, crime_preference, reports_preference,
+                  first_name, last_name
+           FROM users 
+           WHERE id = $1 AND is_active = true`,
+          [userId]
+        );
+
+        if (userResult.rows.length > 0) {
+          const prefs = userResult.rows[0];
+          userPreferences = {
+            lighting: prefs.lighting_preference,
+            business: prefs.business_preference,
+            crime: prefs.crime_preference,
+            reports: prefs.reports_preference,
+          };
+          preferencesSource = "user_profile";
+          console.log(
+            `Using custom preferences for user ${prefs.first_name} ${prefs.last_name}:`,
+            userPreferences
+          );
+        } else {
+          console.log(`User ${userId} not found, using default preferences`);
+        }
+      } catch (prefError) {
+        console.warn(
+          "Could not load user preferences, using defaults:",
+          prefError.message
+        );
+        preferencesSource = "fallback_default";
+      }
+    } else {
+      console.log("No userId provided, using default preferences");
+    }
+
     // Get alternative routes from Google
     const routes = await getRoutesFromGoogle(origin, destination);
 
@@ -30,12 +78,12 @@ const calculateRoute = async (req, res) => {
       });
     }
 
-    // Score all routes with relative normalization
+    // Score all routes with user preferences
     let routeScores;
     try {
       // Extract just the paths for scoring
       const routePaths = routes.map((route) => route.path);
-      routeScores = await scoreRoutes(routePaths);
+      routeScores = await scoreRoutes(routePaths, userPreferences);
     } catch (scoringError) {
       console.warn(
         "New scoring system failed, falling back to individual scoring:",
@@ -43,7 +91,9 @@ const calculateRoute = async (req, res) => {
       );
       // Fallback to individual scoring
       routeScores = await Promise.all(
-        routes.map(async (route) => await scoreRoute(route.path))
+        routes.map(
+          async (route) => await scoreRoute(route.path, userPreferences)
+        )
       );
     }
 
@@ -59,6 +109,7 @@ const calculateRoute = async (req, res) => {
         lightingScore: scoreData.lightingScore,
         businessScore: scoreData.businessScore,
         crimeScore: scoreData.crimeScore,
+        reportsScore: scoreData.reportsScore,
 
         // Google data - duration and distance
         walkingTime: {
@@ -77,11 +128,26 @@ const calculateRoute = async (req, res) => {
 
         // Additional Google route info
         routeSummary: route.googleRouteData?.summary || "",
+
+        // User preference information
+        userPreferences: userPreferences,
+        preferencesSource: preferencesSource,
+
+        // Detailed breakdown for transparency
+        scoreBreakdown: scoreData.breakdown,
       };
     });
 
     // Sort by safety score (descending)
     scoredRoutes.sort((a, b) => b.score - a.score);
+
+    // Create preference summary for response
+    const preferenceWeights = {
+      lighting: `${Math.round(userPreferences.lighting * 100)}%`,
+      business: `${Math.round(userPreferences.business * 100)}%`,
+      crime: `${Math.round(userPreferences.crime * 100)}%`,
+      reports: `${Math.round(userPreferences.reports * 100)}%`,
+    };
 
     // Response with all routes and recommended one
     res.status(200).json({
@@ -90,10 +156,13 @@ const calculateRoute = async (req, res) => {
       routes: scoredRoutes,
       recommendation: scoredRoutes[0],
       scoringInfo: {
-        lightingWeight: "50%",
-        businessWeight: "45%",
-        crimeWeight: "5%",
-        scoringMethod: "relative_normalization",
+        preferencesUsed: preferenceWeights,
+        preferencesSource: preferencesSource,
+        scoringMethod: "user_weighted_normalization",
+        message:
+          preferencesSource === "user_profile"
+            ? "Routes calculated using your personal safety preferences"
+            : "Routes calculated using default safety preferences",
       },
     });
   } catch (error) {

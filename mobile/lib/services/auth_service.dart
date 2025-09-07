@@ -22,7 +22,7 @@ class AuthService {
             true;
   }
 
-  // Register new user
+  // Register new user with preferences
   static Future<Map<String, dynamic>> registerUser({
     required String phone,
     required String email,
@@ -30,6 +30,10 @@ class AuthService {
     required String firstName,
     required String lastName,
     String? dateOfBirth,
+    double lightingPreference = 0.30,
+    double businessPreference = 0.25,
+    double crimePreference = 0.20,
+    double reportsPreference = 0.25,
   }) async {
     final url = Uri.parse('${ApiConfig.baseUrl}/api/auth/register');
 
@@ -44,6 +48,10 @@ class AuthService {
           "firstName": firstName,
           "lastName": lastName,
           "dateOfBirth": dateOfBirth,
+          "lightingPreference": lightingPreference,
+          "businessPreference": businessPreference,
+          "crimePreference": crimePreference,
+          "reportsPreference": reportsPreference,
         }),
       );
 
@@ -140,7 +148,7 @@ class AuthService {
     }
   }
 
-  // Get user profile with reputation info
+  // Get user profile with reputation info and preferences
   static Future<Map<String, dynamic>> getUserProfile() async {
     final url = Uri.parse('${ApiConfig.baseUrl}/api/users/profile');
 
@@ -196,6 +204,100 @@ class AuthService {
         "success": false,
         "error": "network_error",
         "message": "Network error occurred",
+      };
+    }
+  }
+
+  // Update user preferences
+  static Future<Map<String, dynamic>> updatePreferences({
+    required double lightingPreference,
+    required double businessPreference,
+    required double crimePreference,
+    required double reportsPreference,
+  }) async {
+    final url = Uri.parse('${ApiConfig.baseUrl}/api/auth/preferences');
+
+    try {
+      final token = await _getToken();
+      if (token == null) {
+        return {
+          "success": false,
+          "error": "no_token",
+          "message": "Please log in again",
+        };
+      }
+
+      final response = await http.put(
+        url,
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": "Bearer $token",
+        },
+        body: jsonEncode({
+          "lightingPreference": lightingPreference,
+          "businessPreference": businessPreference,
+          "crimePreference": crimePreference,
+          "reportsPreference": reportsPreference,
+        }),
+      );
+
+      final data = jsonDecode(response.body);
+
+      if (response.statusCode == 200) {
+        return {
+          "success": true,
+          "message": data['message'],
+          "preferences": data['preferences'],
+        };
+      } else if (response.statusCode == 401 || response.statusCode == 403) {
+        if (_shouldClearToken(data)) {
+          await _clearToken();
+        }
+        return {
+          "success": false,
+          "error": "unauthorized",
+          "message": data['error'] ?? 'Authentication failed',
+        };
+      } else {
+        return {
+          "success": false,
+          "error": "update_failed",
+          "message": data['error'] ?? 'Failed to update preferences',
+        };
+      }
+    } catch (e) {
+      print("Preferences update error: $e");
+      return {
+        "success": false,
+        "error": "network_error",
+        "message": "Network error occurred",
+      };
+    }
+  }
+
+  // Get preference presets
+  static Future<Map<String, dynamic>> getPreferencePresets() async {
+    final url = Uri.parse('${ApiConfig.baseUrl}/api/auth/presets');
+
+    try {
+      final response = await http.get(url);
+      final data = jsonDecode(response.body);
+
+      if (response.statusCode == 200) {
+        return {"success": true, "presets": data['presets']};
+      } else {
+        return {
+          "success": false,
+          "error": "fetch_failed",
+          "message": data['error'] ?? 'Failed to fetch presets',
+        };
+      }
+    } catch (e) {
+      print("Presets fetch error: $e");
+      return {
+        "success": false,
+        "error": "network_error",
+        "message": "Network error occurred: $e",
       };
     }
   }
@@ -473,6 +575,46 @@ class AuthService {
     return password.length >= 6;
   }
 
+  // Helper methods for preference validation
+  static bool isValidPreferences(
+    double lighting,
+    double business,
+    double crime,
+    double reports,
+  ) {
+    final total = lighting + business + crime + reports;
+    return (total - 1.0).abs() < 0.01 &&
+        [
+          lighting,
+          business,
+          crime,
+          reports,
+        ].every((pref) => pref >= 0 && pref <= 1);
+  }
+
+  static Map<String, double> normalizePreferences(
+    double lighting,
+    double business,
+    double crime,
+    double reports,
+  ) {
+    final total = lighting + business + crime + reports;
+    if (total <= 0) {
+      return {
+        'lighting': 0.30,
+        'business': 0.25,
+        'crime': 0.20,
+        'reports': 0.25,
+      };
+    }
+    return {
+      'lighting': lighting / total,
+      'business': business / total,
+      'crime': crime / total,
+      'reports': reports / total,
+    };
+  }
+
   // Helper methods for badge display
   static String getBadgeDisplayName(String badgeLevel) {
     switch (badgeLevel) {
@@ -516,6 +658,76 @@ class AuthService {
         return Icons.stars;
       default:
         return Icons.star_border;
+    }
+  }
+
+  // Helper methods for preference presets
+  static Map<String, Map<String, double>> getDefaultPresets() {
+    return {
+      'balanced': {
+        'lighting': 0.30,
+        'business': 0.25,
+        'crime': 0.20,
+        'reports': 0.25,
+      },
+      'lighting_focused': {
+        'lighting': 0.70,
+        'business': 0.15,
+        'crime': 0.10,
+        'reports': 0.05,
+      },
+      'business_focused': {
+        'lighting': 0.20,
+        'business': 0.60,
+        'crime': 0.10,
+        'reports': 0.10,
+      },
+      'crime_focused': {
+        'lighting': 0.25,
+        'business': 0.15,
+        'crime': 0.50,
+        'reports': 0.10,
+      },
+      'community_focused': {
+        'lighting': 0.20,
+        'business': 0.20,
+        'crime': 0.10,
+        'reports': 0.50,
+      },
+    };
+  }
+
+  static String getPresetDisplayName(String presetName) {
+    switch (presetName) {
+      case 'balanced':
+        return 'Balanced';
+      case 'lighting_focused':
+        return 'Lighting Focused';
+      case 'business_focused':
+        return 'Business Areas';
+      case 'crime_focused':
+        return 'Crime Avoidance';
+      case 'community_focused':
+        return 'Community Reports';
+      default:
+        return presetName;
+    }
+  }
+
+  static String getPresetDescription(String presetName) {
+    switch (presetName) {
+      case 'balanced':
+        return 'Balanced safety priorities for all situations';
+      case 'lighting_focused':
+        return 'Prioritize well-lit areas above all else';
+      case 'business_focused':
+        return 'Prefer areas with open businesses and activity';
+      case 'crime_focused':
+        return 'Maximum avoidance of high crime areas';
+      case 'community_focused':
+        return 'Trust community reports and crowdsourced data';
+      default:
+        return 'Custom preference preset';
     }
   }
 }

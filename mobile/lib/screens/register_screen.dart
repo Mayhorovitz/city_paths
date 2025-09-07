@@ -25,6 +25,96 @@ class _RegisterScreenState extends State<RegisterScreen> {
   bool _obscureConfirmPassword = true;
   DateTime? _selectedDate;
 
+  // Preference variables
+  double _lightingPreference = 0.30;
+  double _businessPreference = 0.25;
+  double _crimePreference = 0.20;
+  double _reportsPreference = 0.25;
+
+  String _selectedPreset = 'balanced';
+  bool _showAdvancedPreferences = false;
+
+  final Map<String, Map<String, double>> _presets = {
+    'balanced': {
+      'lighting': 0.30,
+      'business': 0.25,
+      'crime': 0.20,
+      'reports': 0.25,
+    },
+    'lighting_focused': {
+      'lighting': 0.70,
+      'business': 0.15,
+      'crime': 0.10,
+      'reports': 0.05,
+    },
+    'business_focused': {
+      'lighting': 0.20,
+      'business': 0.60,
+      'crime': 0.10,
+      'reports': 0.10,
+    },
+    'crime_focused': {
+      'lighting': 0.25,
+      'business': 0.15,
+      'crime': 0.50,
+      'reports': 0.10,
+    },
+    'community_focused': {
+      'lighting': 0.20,
+      'business': 0.20,
+      'crime': 0.10,
+      'reports': 0.50,
+    },
+  };
+
+  void _applyPreset(String preset) {
+    if (_presets.containsKey(preset)) {
+      setState(() {
+        _selectedPreset = preset;
+        _lightingPreference = _presets[preset]!['lighting']!;
+        _businessPreference = _presets[preset]!['business']!;
+        _crimePreference = _presets[preset]!['crime']!;
+        _reportsPreference = _presets[preset]!['reports']!;
+      });
+    }
+  }
+
+  void _normalizePreferences() {
+    final total =
+        _lightingPreference +
+        _businessPreference +
+        _crimePreference +
+        _reportsPreference;
+    if (total > 0) {
+      setState(() {
+        _lightingPreference /= total;
+        _businessPreference /= total;
+        _crimePreference /= total;
+        _reportsPreference /= total;
+      });
+    }
+  }
+
+  void _updatePreferenceFromSlider(String type, double value) {
+    setState(() {
+      switch (type) {
+        case 'lighting':
+          _lightingPreference = value;
+          break;
+        case 'business':
+          _businessPreference = value;
+          break;
+        case 'crime':
+          _crimePreference = value;
+          break;
+        case 'reports':
+          _reportsPreference = value;
+          break;
+      }
+      _selectedPreset = 'custom'; // Mark as custom when manually adjusted
+    });
+  }
+
   Future<void> _selectDate() async {
     final DateTime? picked = await showDatePicker(
       context: context,
@@ -47,6 +137,9 @@ class _RegisterScreenState extends State<RegisterScreen> {
   Future<void> _handleRegister() async {
     if (!_formKey.currentState!.validate()) return;
 
+    // Normalize preferences to ensure they sum to 1.0
+    _normalizePreferences();
+
     setState(() {
       _isLoading = true;
     });
@@ -59,6 +152,10 @@ class _RegisterScreenState extends State<RegisterScreen> {
         firstName: _firstNameController.text.trim(),
         lastName: _lastNameController.text.trim(),
         dateOfBirth: _selectedDate != null ? _dateOfBirthController.text : null,
+        lightingPreference: _lightingPreference,
+        businessPreference: _businessPreference,
+        crimePreference: _crimePreference,
+        reportsPreference: _reportsPreference,
       );
 
       setState(() {
@@ -358,6 +455,11 @@ class _RegisterScreenState extends State<RegisterScreen> {
 
                 const SizedBox(height: 32),
 
+                // Safety Preferences Section
+                _buildPreferencesSection(),
+
+                const SizedBox(height: 32),
+
                 // Register button
                 SizedBox(
                   width: double.infinity,
@@ -424,6 +526,355 @@ class _RegisterScreenState extends State<RegisterScreen> {
         ),
       ),
     );
+  }
+
+  Widget _buildPreferencesSection() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text(
+          'Safety Priorities',
+          style: TextStyle(
+            fontSize: 20,
+            fontWeight: FontWeight.bold,
+            color: Color(0xFF004d71),
+          ),
+        ),
+        const SizedBox(height: 8),
+        const Text(
+          'Customize how routes are calculated based on your safety priorities',
+          style: TextStyle(fontSize: 14, color: Colors.grey),
+        ),
+        const SizedBox(height: 16),
+
+        // Preset selection
+        Container(
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: Colors.grey.shade300),
+          ),
+          child: DropdownButtonFormField<String>(
+            value: _selectedPreset,
+            decoration: const InputDecoration(
+              labelText: 'Choose a preset',
+              border: InputBorder.none,
+              contentPadding: EdgeInsets.symmetric(
+                horizontal: 16,
+                vertical: 16,
+              ),
+            ),
+            items: [
+              DropdownMenuItem(
+                value: 'balanced',
+                child: Text(AuthService.getPresetDisplayName('balanced')),
+              ),
+              DropdownMenuItem(
+                value: 'lighting_focused',
+                child: Text(
+                  AuthService.getPresetDisplayName('lighting_focused'),
+                ),
+              ),
+              DropdownMenuItem(
+                value: 'business_focused',
+                child: Text(
+                  AuthService.getPresetDisplayName('business_focused'),
+                ),
+              ),
+              DropdownMenuItem(
+                value: 'crime_focused',
+                child: Text(AuthService.getPresetDisplayName('crime_focused')),
+              ),
+              DropdownMenuItem(
+                value: 'community_focused',
+                child: Text(
+                  AuthService.getPresetDisplayName('community_focused'),
+                ),
+              ),
+              DropdownMenuItem(value: 'custom', child: Text('Custom')),
+            ],
+            onChanged: (value) {
+              if (value != null && value != 'custom') {
+                _applyPreset(value);
+              }
+            },
+          ),
+        ),
+
+        const SizedBox(height: 16),
+
+        // Show current distribution
+        Container(
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: Colors.blue.shade50,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: Colors.blue.shade200),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'Current Distribution:',
+                style: TextStyle(fontWeight: FontWeight.bold),
+              ),
+              const SizedBox(height: 8),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceAround,
+                children: [
+                  _buildDistributionChip(
+                    'Lighting',
+                    _lightingPreference,
+                    Colors.amber,
+                  ),
+                  _buildDistributionChip(
+                    'Business',
+                    _businessPreference,
+                    Colors.green,
+                  ),
+                  _buildDistributionChip('Crime', _crimePreference, Colors.red),
+                  _buildDistributionChip(
+                    'Reports',
+                    _reportsPreference,
+                    Colors.blue,
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+
+        const SizedBox(height: 16),
+
+        // Advanced preferences toggle
+        TextButton.icon(
+          onPressed: () {
+            setState(() {
+              _showAdvancedPreferences = !_showAdvancedPreferences;
+            });
+          },
+          icon: Icon(
+            _showAdvancedPreferences ? Icons.expand_less : Icons.expand_more,
+          ),
+          label: Text(
+            _showAdvancedPreferences
+                ? 'Hide Advanced Settings'
+                : 'Show Advanced Settings',
+          ),
+        ),
+
+        // Advanced sliders
+        if (_showAdvancedPreferences) ...[
+          const SizedBox(height: 16),
+          _buildPreferenceSlider(
+            'Street Lighting',
+            _lightingPreference,
+            Icons.lightbulb_outline,
+            Colors.amber,
+            (value) => _updatePreferenceFromSlider('lighting', value),
+          ),
+          _buildPreferenceSlider(
+            'Open Businesses',
+            _businessPreference,
+            Icons.store,
+            Colors.green,
+            (value) => _updatePreferenceFromSlider('business', value),
+          ),
+          _buildPreferenceSlider(
+            'Crime Avoidance',
+            _crimePreference,
+            Icons.security,
+            Colors.red,
+            (value) => _updatePreferenceFromSlider('crime', value),
+          ),
+          _buildPreferenceSlider(
+            'Community Reports',
+            _reportsPreference,
+            Icons.people,
+            Colors.blue,
+            (value) => _updatePreferenceFromSlider('reports', value),
+          ),
+
+          const SizedBox(height: 16),
+
+          // Auto-normalize button
+          Center(
+            child: ElevatedButton.icon(
+              onPressed: _normalizePreferences,
+              icon: const Icon(Icons.balance, size: 18),
+              label: const Text('Auto-Balance Preferences'),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.orange,
+                foregroundColor: Colors.white,
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 20,
+                  vertical: 10,
+                ),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(8),
+                ),
+              ),
+            ),
+          ),
+        ],
+      ],
+    );
+  }
+
+  Widget _buildDistributionChip(String label, double value, Color color) {
+    Color darkColor;
+    switch (color) {
+      case Colors.amber:
+        darkColor = Colors.amber[700]!;
+        break;
+      case Colors.green:
+        darkColor = Colors.green[700]!;
+        break;
+      case Colors.red:
+        darkColor = Colors.red[700]!;
+        break;
+      case Colors.blue:
+        darkColor = Colors.blue[700]!;
+        break;
+      default:
+        darkColor = Colors.grey[700]!;
+    }
+
+    return Column(
+      children: [
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+          decoration: BoxDecoration(
+            color: color.withValues(alpha: 0.2),
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(color: color.withValues(alpha: 0.5)),
+          ),
+          child: Text(
+            '${(value * 100).round()}%',
+            style: TextStyle(
+              color: darkColor,
+              fontWeight: FontWeight.bold,
+              fontSize: 12,
+            ),
+          ),
+        ),
+        const SizedBox(height: 4),
+        Text(label, style: const TextStyle(fontSize: 10, color: Colors.grey)),
+      ],
+    );
+  }
+
+  Widget _buildPreferenceSlider(
+    String title,
+    double value,
+    IconData icon,
+    Color color,
+    Function(double) onChanged,
+  ) {
+    Color darkColor;
+    switch (color) {
+      case Colors.amber:
+        darkColor = Colors.amber[700]!;
+        break;
+      case Colors.green:
+        darkColor = Colors.green[700]!;
+        break;
+      case Colors.red:
+        darkColor = Colors.red[700]!;
+        break;
+      case Colors.blue:
+        darkColor = Colors.blue[700]!;
+        break;
+      default:
+        darkColor = Colors.grey[700]!;
+    }
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 20),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(icon, color: color, size: 20),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  title,
+                  style: const TextStyle(
+                    fontWeight: FontWeight.w500,
+                    fontSize: 16,
+                  ),
+                ),
+              ),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                decoration: BoxDecoration(
+                  color: color.withValues(alpha: 0.2),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Text(
+                  '${(value * 100).round()}%',
+                  style: TextStyle(
+                    color: darkColor,
+                    fontWeight: FontWeight.bold,
+                    fontSize: 14,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Container(
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(8),
+              color: Colors.grey.shade100,
+            ),
+            child: SliderTheme(
+              data: SliderTheme.of(context).copyWith(
+                activeTrackColor: color,
+                thumbColor: color,
+                overlayColor: color.withValues(alpha: 0.2),
+                inactiveTrackColor: color.withValues(alpha: 0.3),
+                trackHeight: 6,
+                thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 8),
+              ),
+              child: Slider(
+                value: value,
+                min: 0.0,
+                max: 1.0,
+                divisions: 20,
+                onChanged: onChanged,
+              ),
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            _getPreferenceDescription(title),
+            style: TextStyle(
+              fontSize: 12,
+              color: Colors.grey.shade600,
+              fontStyle: FontStyle.italic,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  String _getPreferenceDescription(String title) {
+    switch (title) {
+      case 'Street Lighting':
+        return 'Prioritize well-lit streets and avoid dark areas';
+      case 'Open Businesses':
+        return 'Prefer routes with active businesses and foot traffic';
+      case 'Crime Avoidance':
+        return 'Avoid areas with reported criminal activity';
+      case 'Community Reports':
+        return 'Consider real-time safety reports from other users';
+      default:
+        return '';
+    }
   }
 
   @override
