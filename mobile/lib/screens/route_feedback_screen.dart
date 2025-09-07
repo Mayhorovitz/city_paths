@@ -22,7 +22,6 @@ class RouteFeedbackScreen extends StatefulWidget {
 
 class _RouteFeedbackScreenState extends State<RouteFeedbackScreen> {
   int _safetyRating = 0;
-  int _accuracyRating = 0;
   bool _wouldUseAgain = true;
   final TextEditingController _commentsController = TextEditingController();
   bool _isSubmitting = false;
@@ -81,30 +80,13 @@ class _RouteFeedbackScreenState extends State<RouteFeedbackScreen> {
 
             const SizedBox(height: 24),
 
-            // Safety rating
+            // Safety rating - Only question
             _buildRatingSection(
               'How safe did you feel during this route?',
               'Safety Rating',
               _safetyRating,
               (rating) => setState(() => _safetyRating = rating),
               ['Very unsafe', 'Unsafe', 'Neutral', 'Safe', 'Very safe'],
-            ),
-
-            const SizedBox(height: 24),
-
-            // Accuracy rating
-            _buildRatingSection(
-              'How accurate was our safety prediction?',
-              'Accuracy Rating',
-              _accuracyRating,
-              (rating) => setState(() => _accuracyRating = rating),
-              [
-                'Very inaccurate',
-                'Inaccurate',
-                'Somewhat accurate',
-                'Accurate',
-                'Very accurate',
-              ],
             ),
 
             const SizedBox(height: 24),
@@ -383,7 +365,7 @@ class _RouteFeedbackScreenState extends State<RouteFeedbackScreen> {
   }
 
   Widget _buildSubmitButton() {
-    final canSubmit = _safetyRating > 0 && _accuracyRating > 0;
+    final canSubmit = _safetyRating > 0; // Only check safety rating
 
     return SizedBox(
       width: double.infinity,
@@ -433,7 +415,7 @@ class _RouteFeedbackScreenState extends State<RouteFeedbackScreen> {
       await FeedbackService.submitRouteFeedback(
         routeData: widget.routeData,
         safetyRating: _safetyRating,
-        accuracyRating: _accuracyRating,
+        accuracyRating: _safetyRating, // Send same rating as both values
         wouldUseAgain: _wouldUseAgain,
         comments: _commentsController.text,
         actualDuration: widget.actualDuration,

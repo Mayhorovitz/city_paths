@@ -33,7 +33,7 @@ const getActiveReports = async () => {
       FROM reports 
       WHERE is_active = true 
         AND expires_at > NOW()
-        AND created_at > NOW() - INTERVAL '7 days'
+        AND created_at > NOW() - INTERVAL '3 days'
       ORDER BY created_at DESC
     `);
 

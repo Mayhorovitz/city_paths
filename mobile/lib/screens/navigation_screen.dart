@@ -3,9 +3,11 @@ import 'package:flutter/material.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:city_path/screens/report_hazard_screen.dart';
+import 'package:city_path/screens/route_feedback_screen.dart';
 import 'package:city_path/services/location_service.dart';
 import 'package:city_path/services/navigation_service.dart';
 import 'package:city_path/services/map_report_service.dart';
+import 'package:city_path/services/report_service.dart';
 import 'dart:async';
 
 class NavigationScreen extends StatefulWidget {
@@ -35,9 +37,15 @@ class _NavigationScreenState extends State<NavigationScreen> {
   double _currentZoom = 18.0;
   double _currentBearing = 0.0;
 
+  // Navigation tracking for feedback
+  late DateTime _navigationStartTime;
+  List<Map<String, dynamic>> _encounteredReports = [];
+  bool _hasArrived = false;
+
   @override
   void initState() {
     super.initState();
+    _navigationStartTime = DateTime.now(); // Record navigation start time
     _navigationService = NavigationService();
     _initializeNavigation();
     _startLocationTracking();
@@ -94,18 +102,92 @@ class _NavigationScreenState extends State<NavigationScreen> {
     _navigationService.updateLocation(newLocation);
     _updateMapCamera();
     _loadNearbyReports();
+
+    // Check if arrived at destination
+    _checkArrivalAtDestination(newLocation);
+  }
+
+  // Check if user has arrived at destination
+  void _checkArrivalAtDestination(LatLng currentLocation) {
+    if (_hasArrived || _navigationService.routePoints.isEmpty) return;
+
+    final destination = _navigationService.routePoints.last;
+    final distanceToDestination = Geolocator.distanceBetween(
+      currentLocation.latitude,
+      currentLocation.longitude,
+      destination.latitude,
+      destination.longitude,
+    );
+
+    // If within 50 meters of destination, consider arrived
+    if (distanceToDestination < 50.0) {
+      _handleArrivalAtDestination();
+    }
+  }
+
+  // Handle arrival at destination - navigate to feedback screen
+  void _handleArrivalAtDestination() {
+    if (_hasArrived) return; // Prevent multiple triggers
+
+    setState(() {
+      _hasArrived = true;
+    });
+
+    // Stop location tracking
+    _positionStreamSubscription?.cancel();
+
+    // Calculate actual duration
+    final actualDuration = DateTime.now().difference(_navigationStartTime);
+
+    // Navigate to feedback screen
+    Navigator.pushReplacement(
+      context,
+      MaterialPageRoute(
+        builder:
+            (context) => RouteFeedbackScreen(
+              routeData: widget.selectedRoute,
+              destinationAddress: widget.destinationAddress,
+              actualDuration: actualDuration,
+              encounteredReports: _encounteredReports,
+            ),
+      ),
+    );
   }
 
   Future<void> _loadNearbyReports() async {
     if (_currentLocation == null) return;
 
     try {
+      // Get report markers for display
       final reportMarkers = await MapReportService.getReportMarkersNearby(
         latitude: _currentLocation!.latitude,
         longitude: _currentLocation!.longitude,
         radiusKm: 0.5,
         onReportTap: _showReportDetails,
       );
+
+      // Track encountered reports for feedback (closer range)
+      final result = await ReportService.getReportsNearby(
+        latitude: _currentLocation!.latitude,
+        longitude: _currentLocation!.longitude,
+        radiusKm: 0.1, // 100m range for encounter tracking
+      );
+
+      if (result['success']) {
+        final nearbyReports = List<Map<String, dynamic>>.from(
+          result['reports'] ?? [],
+        );
+
+        // Add unique reports to encountered list
+        for (final report in nearbyReports) {
+          if (!_encounteredReports.any((r) => r['id'] == report['id'])) {
+            _encounteredReports.add(report);
+            print(
+              "Encountered report: ${report['category']} at ${report['latitude']}, ${report['longitude']}",
+            );
+          }
+        }
+      }
 
       setState(() {
         // Keep destination marker, replace report markers
@@ -191,6 +273,13 @@ class _NavigationScreenState extends State<NavigationScreen> {
   }
 
   Widget _buildInstructionPanel() {
+    // Show arrival message if close to destination
+    String instruction = _navigationService.currentInstruction;
+    if (_navigationService.totalDistanceRemaining < 100 &&
+        _navigationService.totalDistanceRemaining > 0) {
+      instruction = "Approaching destination - ${widget.destinationAddress}";
+    }
+
     return Positioned(
       top: MediaQuery.of(context).padding.top + 10,
       left: 16,
@@ -207,7 +296,7 @@ class _NavigationScreenState extends State<NavigationScreen> {
               Row(
                 children: [
                   Icon(
-                    _getInstructionIcon(_navigationService.currentInstruction),
+                    _getInstructionIcon(instruction),
                     size: 32,
                     color: Colors.blue,
                   ),
@@ -217,7 +306,7 @@ class _NavigationScreenState extends State<NavigationScreen> {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                          _navigationService.currentInstruction,
+                          instruction,
                           style: const TextStyle(
                             fontSize: 18,
                             fontWeight: FontWeight.bold,
@@ -282,10 +371,10 @@ class _NavigationScreenState extends State<NavigationScreen> {
                 "Distance",
               ),
               _buildInfoColumn(
-                Icons.flag,
-                Colors.red,
-                "${_navigationService.routePoints.length - _navigationService.currentStepIndex}",
-                "Steps left",
+                Icons.report,
+                Colors.orange,
+                "${_encounteredReports.length}",
+                "Reports Seen",
               ),
             ],
           ),
@@ -361,7 +450,8 @@ class _NavigationScreenState extends State<NavigationScreen> {
     if (instruction.contains("right")) return Icons.turn_right;
     if (instruction.contains("left")) return Icons.turn_left;
     if (instruction.contains("straight")) return Icons.straight;
-    if (instruction.contains("arrived")) return Icons.location_on;
+    if (instruction.contains("arrived") || instruction.contains("Approaching"))
+      return Icons.location_on;
     return Icons.navigation;
   }
 }
