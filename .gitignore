@@ -187,3 +187,86 @@ logs/
 # Cache directories
 .cache/
 .parcel-cache/
+
+
+# ===== TESTING =====
+# Test databases and coverage
+backend/tests/coverage/
+backend/jest-coverage/
+backend/.nyc_output/
+**/coverage/
+**/*.coverage
+
+# Test environment files
+backend/.env.test
+ml_service/.env.test
+
+# ===== SECURITY & SECRETS =====
+# JWT secrets and API keys
+backend/.env*
+ml_service/.env*
+mobile/.env*
+mobile/android/app/google-services.json
+mobile/ios/Runner/GoogleService-Info.plist
+
+# Postman sensitive data
+**/*postman_environment*.json
+**/postman_globals.json
+
+# ===== DEVELOPMENT =====
+# Development tools
+backend/nodemon.json
+.vscode/settings.json
+.idea/workspace.xml
+
+# Package manager lock files (choose one strategy)
+# Option 1: Include lock files (recommended)
+# Option 2: Exclude lock files
+# backend/package-lock.json
+# ml_service/requirements-lock.txt
+
+# ===== BACKEND SPECIFIC =====
+# Uploaded files and media
+backend/uploads/**/*
+!backend/uploads/.gitkeep
+
+# Generated API documentation
+backend/docs/generated/
+backend/swagger-output.json
+
+# Session storage
+backend/sessions/
+
+# ===== ML SERVICE =====
+# Training artifacts
+ml_service/logs/
+ml_service/tensorboard_logs/
+ml_service/checkpoints/
+ml_service/experiments/
+
+# Data files
+ml_service/data/**/*.csv
+ml_service/data/**/*.json
+!ml_service/data/samples/
+
+# ===== MOBILE SPECIFIC =====
+# Flutter generated files
+mobile/pubspec.lock
+mobile/.flutter-plugins-dependencies
+
+# Platform specific builds
+mobile/android/app/release/
+mobile/ios/Runner.xcworkspace/
+
+# ===== DEPLOYMENT =====
+# Docker compose override
+docker-compose.override.yml
+docker-compose.prod.yml
+
+# Deployment scripts with secrets
+deploy/*.env
+deploy/secrets/
+
+# SSL certificates
+**/*.crt
+**/*.csr

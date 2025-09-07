@@ -1,0 +1,413 @@
+{
+  "info": {
+    "_postman_id": "9e92acf2-63e0-4fff-949d-7d1a8dbbb1ad",
+    "name": "City Paths API",
+    "description": "Community-powered safety navigation app API endpoints",
+    "version": "1.0.0",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "Authentication",
+      "description": "User registration, login and profile management",
+      "item": [
+        {
+          "name": "Register User",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"phone\": \"0541234568\",\n  \"email\": \"testuser@gmail.com\",\n  \"password\": \"123456\",\n  \"firstName\": \"Test\",\n  \"lastName\": \"User\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/auth/register",
+              "host": ["{{base_url}}"],
+              "path": ["api", "auth", "register"]
+            },
+            "description": "Register a new user account"
+          }
+        },
+        {
+          "name": "Login User",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "// Save token from response",
+                  "if (pm.response.code === 200) {",
+                  "    const response = pm.response.json();",
+                  "    if (response.token) {",
+                  "        pm.collectionVariables.set('token', response.token);",
+                  "    }",
+                  "}"
+                ]
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"phoneOrEmail\": \"0541234567\",\n  \"password\": \"mypassword123\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/auth/login",
+              "host": ["{{base_url}}"],
+              "path": ["api", "auth", "login"]
+            },
+            "description": "Login with phone/email and password. Token will be automatically saved."
+          }
+        },
+        {
+          "name": "Get User Profile",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/users/profile",
+              "host": ["{{base_url}}"],
+              "path": ["api", "users", "profile"]
+            },
+            "description": "Get current user profile information"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Routes",
+      "description": "Route calculation and safety scoring",
+      "item": [
+        {
+          "name": "Calculate Safe Route - Tel Aviv Center",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"origin\": [32.0853, 34.7818],\n  \"destination\": [32.0732, 34.7925]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/routes/calculate",
+              "host": ["{{base_url}}"],
+              "path": ["api", "routes", "calculate"]
+            },
+            "description": "Calculate safe route alternatives between two points in Tel Aviv"
+          }
+        },
+        {
+          "name": "Calculate Safe Route - Tel Aviv to Jaffa",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"origin\": [32.0453362, 34.75842144],\n  \"destination\": [32.0653405, 34.7648233]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/routes/calculate",
+              "host": ["{{base_url}}"],
+              "path": ["api", "routes", "calculate"]
+            },
+            "description": "Calculate safe route from Tel Aviv to Jaffa area"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Reports",
+      "description": "Safety reports submission and retrieval",
+      "item": [
+        {
+          "name": "Submit Safety Report",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"category\": \"poor_lighting\",\n  \"description\": \"Street light is completely broken on this corner\",\n  \"urgencyLevel\": \"medium\",\n  \"latitude\": 32.0853,\n  \"longitude\": 34.7818\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/reports/submit",
+              "host": ["{{base_url}}"],
+              "path": ["api", "reports", "submit"]
+            },
+            "description": "Submit a new safety report. Categories: poor_lighting, suspicious_gathering, road_hazard, violence_assault, harassment, police_security"
+          }
+        },
+        {
+          "name": "Submit Test Report for Voting",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"category\": \"poor_lighting\",\n  \"description\": \"Test report for voting\",\n  \"urgencyLevel\": \"medium\",\n  \"latitude\": 32.0853,\n  \"longitude\": 34.7818\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/reports/submit",
+              "host": ["{{base_url}}"],
+              "path": ["api", "reports", "submit"]
+            },
+            "description": "Submit a test report for demonstrating voting functionality"
+          }
+        },
+        {
+          "name": "Get Nearby Reports",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/reports/nearby?lat=32.0853&lng=34.7818&radius=2",
+              "host": ["{{base_url}}"],
+              "path": ["api", "reports", "nearby"],
+              "query": [
+                {
+                  "key": "lat",
+                  "value": "32.0853",
+                  "description": "Latitude coordinate"
+                },
+                {
+                  "key": "lng",
+                  "value": "34.7818",
+                  "description": "Longitude coordinate"
+                },
+                {
+                  "key": "radius",
+                  "value": "2",
+                  "description": "Search radius in kilometers"
+                }
+              ]
+            },
+            "description": "Get safety reports near a specific location"
+          }
+        },
+        {
+          "name": "Vote on Report",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"vote\": \"up\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            },
+            "url": {
+              "raw": "{{base_url}}/api/reports/5/vote",
+              "host": ["{{base_url}}"],
+              "path": ["api", "reports", "5", "vote"]
+            },
+            "description": "Vote on a report (up/down). Change the report ID in the URL. Users cannot vote on their own reports."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Users & Reputation",
+      "description": "User reputation and leaderboard system",
+      "item": [
+        {
+          "name": "Get Leaderboard",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/users/leaderboard",
+              "host": ["{{base_url}}"],
+              "path": ["api", "users", "leaderboard"]
+            },
+            "description": "Get top users leaderboard by reputation"
+          }
+        },
+        {
+          "name": "Get User Reputation Details",
+          "request": {
+            "auth": {
+              "type": "bearer",
+              "bearer": [
+                {
+                  "key": "token",
+                  "value": "{{token}}",
+                  "type": "string"
+                }
+              ]
+            },
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/users/reputation",
+              "host": ["{{base_url}}"],
+              "path": ["api", "users", "reputation"]
+            },
+            "description": "Get detailed reputation breakdown for current user"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Map Layers",
+      "description": "Safety layer data for map visualization",
+      "item": [
+        {
+          "name": "Get Lighting Layer",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/api/layers?type=lighting",
+              "host": ["{{base_url}}"],
+              "path": ["api", "layers"],
+              "query": [
+                {
+                  "key": "type",
+                  "value": "lighting",
+                  "description": "Layer type: lighting, business, crime"
+                }
+              ]
+            },
+            "description": "Get street lighting layer data for map display"
+          }
+        }
+      ]
+    }
+  ],
+  "event": [
+    {
+      "listen": "prerequest",
+      "script": {
+        "type": "text/javascript",
+        "exec": [
+          "// Set base URL if not set",
+          "if (!pm.collectionVariables.get('base_url')) {",
+          "    pm.collectionVariables.set('base_url', 'http://localhost:3000');",
+          "}"
+        ]
+      }
+    }
+  ],
+  "variable": [
+    {
+      "key": "base_url",
+      "value": "http://localhost:3000",
+      "type": "string",
+      "description": "Base URL for the API"
+    },
+    {
+      "key": "token",
+      "value": "",
+      "type": "string",
+      "description": "JWT authentication token (will be set automatically after login)"
+    }
+  ]
+}
