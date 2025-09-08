@@ -81,7 +81,7 @@ Run automated tests: `npm test` (backend)
 ### Clone the repository
 
 ```bash
-git clone https://github.com/your-username/city_paths.git
+git clone https://github.com/mayhorovitz/city_paths.git
 cd city_paths
 ```
 
