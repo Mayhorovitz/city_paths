@@ -1,4 +1,4 @@
-// lib/services/map_report_service.dart - Updated with reputation display
+// lib/services/map_report_service.dart
 
 import 'package:flutter/material.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
@@ -7,6 +7,7 @@ import 'package:city_path/services/auth_service.dart';
 import 'package:city_path/utils.dart';
 
 class MapReportService {
+  // Get report markers for the map with callback for report details
   static Future<Set<Marker>> getReportMarkersNearby({
     required double latitude,
     required double longitude,
@@ -51,6 +52,7 @@ class MapReportService {
     return <Marker>{};
   }
 
+  // Get marker icon based on category and reporter reputation
   static BitmapDescriptor _getReportMarkerIcon(
     String category,
     String badgeLevel,
@@ -100,6 +102,7 @@ class MapReportService {
     return BitmapDescriptor.defaultMarkerWithHue(hue);
   }
 
+  // Get display name for report category
   static String _getCategoryDisplayName(String category) {
     switch (category) {
       case 'poor_lighting':
@@ -119,6 +122,7 @@ class MapReportService {
     }
   }
 
+  // Get reporter information with reputation
   static String _getReporterInfo(Map<String, dynamic> report) {
     final name = report['reporterName'] ?? 'Anonymous';
     final badge = report['reporterBadge'] ?? 'newcomer';
@@ -127,6 +131,7 @@ class MapReportService {
     return '$name (${AuthService.getBadgeDisplayName(badge)} - $reputation pts)';
   }
 
+  // Get color for report category
   static Color getCategoryColor(String category) {
     switch (category) {
       case 'poor_lighting':
@@ -146,6 +151,7 @@ class MapReportService {
     }
   }
 
+  // Get icon for report category
   static IconData getCategoryIcon(String category) {
     switch (category) {
       case 'poor_lighting':
@@ -165,6 +171,7 @@ class MapReportService {
     }
   }
 
+  // Format report creation time
   static String _formatReportTime(String dateString) {
     try {
       final date = DateTime.parse(dateString);
@@ -183,10 +190,12 @@ class MapReportService {
     }
   }
 
+  // Show report details bottom sheet with vote refresh callback
   static void showReportDetailsBottomSheet({
     required BuildContext context,
     required Map<String, dynamic> report,
     bool isInNavigation = false,
+    VoidCallback? onVoteSuccess, // NEW: Callback for refreshing map after vote
   }) {
     showModalBottomSheet(
       context: context,
@@ -200,15 +209,17 @@ class MapReportService {
             padding: const EdgeInsets.all(20),
             child:
                 isInNavigation
-                    ? _buildCompactReportDetails(context, report)
-                    : _buildFullReportDetails(context, report),
+                    ? _buildCompactReportDetails(context, report, onVoteSuccess)
+                    : _buildFullReportDetails(context, report, onVoteSuccess),
           ),
     );
   }
 
+  // Build compact report details for navigation mode
   static Widget _buildCompactReportDetails(
     BuildContext context,
     Map<String, dynamic> report,
+    VoidCallback? onVoteSuccess, // NEW: Pass callback to voting section
   ) {
     return Column(
       mainAxisSize: MainAxisSize.min,
@@ -289,8 +300,8 @@ class MapReportService {
 
         const SizedBox(height: 16),
 
-        // Voting Section
-        _buildVotingSection(context, report),
+        // Voting Section with callback
+        _buildVotingSection(context, report, onVoteSuccess),
 
         const SizedBox(height: 16),
 
@@ -322,9 +333,11 @@ class MapReportService {
     );
   }
 
+  // Build full report details for regular mode
   static Widget _buildFullReportDetails(
     BuildContext context,
     Map<String, dynamic> report,
+    VoidCallback? onVoteSuccess, // NEW: Pass callback to voting section
   ) {
     return SingleChildScrollView(
       child: Column(
@@ -422,8 +435,8 @@ class MapReportService {
 
           const SizedBox(height: 16),
 
-          // Voting Section
-          _buildVotingSection(context, report),
+          // Voting Section with callback
+          _buildVotingSection(context, report, onVoteSuccess),
 
           const SizedBox(height: 16),
 
@@ -463,9 +476,11 @@ class MapReportService {
     );
   }
 
+  // Build voting section with real-time updates
   static Widget _buildVotingSection(
     BuildContext context,
     Map<String, dynamic> report,
+    VoidCallback? onVoteSuccess, // NEW: Callback for map refresh
   ) {
     return Container(
       padding: const EdgeInsets.all(12),
@@ -478,7 +493,13 @@ class MapReportService {
         mainAxisAlignment: MainAxisAlignment.spaceAround,
         children: [
           GestureDetector(
-            onTap: () => _handleVote(context, report, true),
+            onTap: () async {
+              // NEW: Handle vote and refresh map on success
+              final result = await _handleVote(context, report, true);
+              if (result != null && onVoteSuccess != null) {
+                onVoteSuccess(); // Refresh the map markers
+              }
+            },
             child: Column(
               children: [
                 Icon(Icons.thumb_up, color: Colors.green, size: 24),
@@ -488,7 +509,13 @@ class MapReportService {
             ),
           ),
           GestureDetector(
-            onTap: () => _handleVote(context, report, false),
+            onTap: () async {
+              // NEW: Handle vote and refresh map on success
+              final result = await _handleVote(context, report, false);
+              if (result != null && onVoteSuccess != null) {
+                onVoteSuccess(); // Refresh the map markers
+              }
+            },
             child: Column(
               children: [
                 Icon(Icons.thumb_down, color: Colors.red, size: 24),
@@ -502,7 +529,8 @@ class MapReportService {
     );
   }
 
-  static Future<void> _handleVote(
+  // Handle voting with return value for success detection
+  static Future<Map<String, dynamic>?> _handleVote(
     BuildContext context,
     Map<String, dynamic> report,
     bool isUpvote,
@@ -514,6 +542,13 @@ class MapReportService {
       );
 
       if (result['success']) {
+        // NEW: Update local report data immediately
+        if (result['report'] != null) {
+          final updatedReport = result['report'];
+          report['upvotes'] = updatedReport['upvotes'];
+          report['downvotes'] = updatedReport['downvotes'];
+        }
+
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text('Vote recorded! ${result['message'] ?? ''}'),
@@ -535,6 +570,8 @@ class MapReportService {
         }
 
         Navigator.pop(context); // Close the bottom sheet
+
+        return result;
       } else {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -542,6 +579,7 @@ class MapReportService {
             backgroundColor: Colors.red,
           ),
         );
+        return null;
       }
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -550,9 +588,11 @@ class MapReportService {
           backgroundColor: Colors.red,
         ),
       );
+      return null;
     }
   }
 
+  // Build info chip widget
   static Widget _buildInfoChip(String label, String value) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),

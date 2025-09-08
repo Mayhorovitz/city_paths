@@ -34,7 +34,7 @@ app.use("/api/users", usersRoutes);
 const feedbackRoutes = require("./routes/feedbackRoutes");
 app.use("/api/feedback", feedbackRoutes);
 
-// Manual cleanup endpoint (for testing)
+// Manual cleanup endpoint
 app.get("/api/admin/cleanup", async (req, res) => {
   try {
     const result = await CleanupService.performDailyCleanup();

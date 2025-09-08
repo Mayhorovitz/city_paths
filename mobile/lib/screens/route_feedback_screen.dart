@@ -1,6 +1,7 @@
 // lib/screens/route_feedback_screen.dart
 import 'package:flutter/material.dart';
 import 'package:city_path/services/feedback_service.dart';
+import 'package:city_path/screens/home_screen.dart';
 
 class RouteFeedbackScreen extends StatefulWidget {
   final Map<String, dynamic> routeData;
@@ -452,7 +453,11 @@ class _RouteFeedbackScreenState extends State<RouteFeedbackScreen> {
   }
 
   void _navigateHome() {
-    Navigator.of(context).popUntil((route) => route.isFirst);
+    // Remove all previous routes and navigate to HomeScreen
+    Navigator.of(context).pushAndRemoveUntil(
+      MaterialPageRoute(builder: (context) => const HomeScreen()),
+      (Route<dynamic> route) => false, // Remove all previous routes
+    );
   }
 
   Color _getSafetyColor(int score) {

@@ -34,23 +34,60 @@ class _ProfileScreenState extends State<ProfileScreen> {
     _loadUserData();
   }
 
+  /// Debug function to print detailed user data information
+  void _debugUserData() {
+    print("=== DEBUG USER DATA ===");
+    print("_userProfile: $_userProfile");
+    print("_userProfile type: ${_userProfile.runtimeType}");
+
+    if (_userProfile != null) {
+      print("Keys in _userProfile: ${_userProfile!.keys.toList()}");
+      print("preferences value: ${_userProfile!['preferences']}");
+      print("preferences type: ${_userProfile!['preferences'].runtimeType}");
+    }
+    print("========================");
+  }
+
+  /// Load all user data including profile, reputation, and leaderboard
   Future<void> _loadUserData() async {
     setState(() => _isLoading = true);
 
     try {
-      // Load user profile
+      // Load user profile with detailed debugging
       final profileResult = await AuthService.getUserProfile();
+      print("=== Profile Result ===");
+      print("Success: ${profileResult['success']}");
+      print("User data: ${profileResult['user']}");
+
       if (profileResult['success']) {
         _userProfile = profileResult['user'];
 
-        // Load current preferences
+        // Check if preferences exist in response
         if (_userProfile!['preferences'] != null) {
           final prefs = _userProfile!['preferences'];
-          _lightingPreference = prefs['lighting']?.toDouble() ?? 0.30;
-          _businessPreference = prefs['business']?.toDouble() ?? 0.25;
-          _crimePreference = prefs['crime']?.toDouble() ?? 0.20;
-          _reportsPreference = prefs['reports']?.toDouble() ?? 0.25;
+          print("Found preferences in profile: $prefs");
+
+          // Ensure values are converted to doubles safely
+          _lightingPreference = (prefs['lighting'] ?? 0.30).toDouble();
+          _businessPreference = (prefs['business'] ?? 0.25).toDouble();
+          _crimePreference = (prefs['crime'] ?? 0.20).toDouble();
+          _reportsPreference = (prefs['reports'] ?? 0.25).toDouble();
+
+          print(
+            "Loaded preferences: L:$_lightingPreference B:$_businessPreference C:$_crimePreference R:$_reportsPreference",
+          );
+        } else {
+          print("No preferences found in user profile, creating defaults");
+          // Create default preferences if they don't exist
+          _userProfile!['preferences'] = {
+            'lighting': 0.30,
+            'business': 0.25,
+            'crime': 0.20,
+            'reports': 0.25,
+          };
         }
+      } else {
+        print("Failed to load profile: ${profileResult['message']}");
       }
 
       // Load reputation details
@@ -71,6 +108,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
     }
   }
 
+  /// Save updated preferences to the server
   Future<void> _savePreferences() async {
     setState(() => _isSavingPreferences = true);
 
@@ -108,6 +146,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
     }
   }
 
+  /// Normalize preferences so they add up to 1.0
   void _normalizePreferences() {
     final total =
         _lightingPreference +
@@ -124,6 +163,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
     }
   }
 
+  /// Show snackbar with success or error message
   void _showSnackBar(String message, {bool isError = false}) {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
@@ -177,6 +217,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
     );
   }
 
+  /// Build the tab navigation bar
   Widget _buildTabBar() {
     return Container(
       color: Colors.white,
@@ -191,6 +232,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
     );
   }
 
+  /// Build individual tab button
   Widget _buildTabButton(String title, int index) {
     final isSelected = _selectedTab == index;
     return Expanded(
@@ -220,9 +262,63 @@ class _ProfileScreenState extends State<ProfileScreen> {
     );
   }
 
+  /// Build the preferences tab with improved error handling
   Widget _buildPreferencesTab() {
-    if (_userProfile == null || _userProfile!['preferences'] == null) {
-      return const Center(child: Text('No preferences data available'));
+    // Debug output for troubleshooting
+    _debugUserData();
+
+    // Enhanced validation checks
+    if (_userProfile == null) {
+      return const Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(Icons.error, size: 64, color: Colors.grey),
+            SizedBox(height: 16),
+            Text('User profile not loaded'),
+          ],
+        ),
+      );
+    }
+
+    // Check if preferences exist
+    final preferences = _userProfile!['preferences'];
+    print("Checking preferences: $preferences");
+
+    if (preferences == null) {
+      return Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            const Icon(Icons.settings, size: 64, color: Colors.grey),
+            const SizedBox(height: 16),
+            const Text('No preferences data available'),
+            const SizedBox(height: 16),
+            ElevatedButton(
+              onPressed: () {
+                // Try to reload data
+                _loadUserData();
+              },
+              child: const Text('Reload Data'),
+            ),
+            const SizedBox(height: 8),
+            TextButton(
+              onPressed: () {
+                // Create default preferences
+                setState(() {
+                  _userProfile!['preferences'] = {
+                    'lighting': 0.30,
+                    'business': 0.25,
+                    'crime': 0.20,
+                    'reports': 0.25,
+                  };
+                });
+              },
+              child: const Text('Use Default Preferences'),
+            ),
+          ],
+        ),
+      );
     }
 
     return SingleChildScrollView(
@@ -265,6 +361,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
     );
   }
 
+  /// Build the display view for preferences (read-only)
   Widget _buildDisplayPreferences() {
     final prefs = _userProfile!['preferences'];
 
@@ -294,7 +391,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
               ),
               const SizedBox(height: 16),
 
-              // Visual bars
+              // Visual preference bars
               _buildPreferenceBar(
                 'Street Lighting',
                 prefs['lighting'],
@@ -328,7 +425,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
         const SizedBox(height: 20),
 
-        // Info card
+        // Information card explaining how preferences work
         Container(
           padding: const EdgeInsets.all(16),
           decoration: BoxDecoration(
@@ -365,6 +462,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
     );
   }
 
+  /// Build a visual preference bar showing percentage and progress
   Widget _buildPreferenceBar(
     String title,
     double value,
@@ -414,10 +512,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
     );
   }
 
+  /// Build the editing interface for preferences
   Widget _buildEditingPreferences() {
     return Column(
       children: [
-        // Sliders
+        // Preference sliders
         _buildPreferenceSlider(
           'Street Lighting',
           _lightingPreference,
@@ -449,7 +548,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
         const SizedBox(height: 20),
 
-        // Normalize button
+        // Auto-balance button to normalize preferences
         ElevatedButton.icon(
           onPressed: _normalizePreferences,
           icon: const Icon(Icons.balance, size: 18),
@@ -462,13 +561,13 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
         const SizedBox(height: 20),
 
-        // Action buttons
+        // Action buttons (Cancel/Save)
         Row(
           children: [
             Expanded(
               child: ElevatedButton(
                 onPressed: () {
-                  // Reset to original values
+                  // Reset to original values from profile
                   if (_userProfile!['preferences'] != null) {
                     final prefs = _userProfile!['preferences'];
                     setState(() {
@@ -516,6 +615,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
     );
   }
 
+  /// Build a preference slider with visual feedback
   Widget _buildPreferenceSlider(
     String title,
     double value,
@@ -523,6 +623,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
     Color color,
     Function(double) onChanged,
   ) {
+    // Determine dark color for better contrast
     Color darkColor;
     switch (color) {
       case Colors.amber:
@@ -609,7 +710,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
     );
   }
 
-  // Keep existing methods for other tabs...
+  /// Build the profile tab showing user information
   Widget _buildProfileTab() {
     if (_userProfile == null) {
       return const Center(child: Text('Failed to load profile'));
@@ -652,7 +753,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     ),
                   ),
                   const SizedBox(height: 8),
-                  // Badge
+                  // Badge display
                   Container(
                     padding: const EdgeInsets.symmetric(
                       horizontal: 12,
@@ -769,6 +870,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
     );
   }
 
+  /// Build the reputation tab showing badge progress
   Widget _buildReputationTab() {
     if (_reputationDetails == null) {
       return const Center(child: Text('Failed to load reputation details'));
@@ -821,6 +923,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
     );
   }
 
+  /// Build the leaderboard tab showing top users
   Widget _buildLeaderboardTab() {
     if (_leaderboard.isEmpty) {
       return const Center(child: Text('No leaderboard data available'));
@@ -848,7 +951,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
             padding: const EdgeInsets.all(16),
             child: Row(
               children: [
-                // Rank
+                // Rank indicator
                 Container(
                   width: 40,
                   height: 40,
@@ -867,7 +970,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   ),
                 ),
                 const SizedBox(width: 16),
-                // User Info
+                // User information
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
@@ -890,7 +993,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     ],
                   ),
                 ),
-                // Score
+                // Score and statistics
                 Column(
                   crossAxisAlignment: CrossAxisAlignment.end,
                   children: [
@@ -916,6 +1019,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
     );
   }
 
+  /// Calculate progress value for badge advancement
   double _calculateProgressValue() {
     try {
       if (_reputationDetails == null ||
@@ -950,10 +1054,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
     }
   }
 
+  /// Get color for rank badge based on position
   Color _getRankColor(int rank) {
-    if (rank == 1) return Colors.amber;
-    if (rank == 2) return Colors.grey[400]!;
-    if (rank == 3) return Colors.brown;
-    return Colors.teal;
+    if (rank == 1) return Colors.amber; // Gold for first place
+    if (rank == 2) return Colors.grey[400]!; // Silver for second place
+    if (rank == 3) return Colors.brown; // Bronze for third place
+    return Colors.teal; // Default color for other ranks
   }
 }

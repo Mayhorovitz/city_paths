@@ -12,7 +12,7 @@ const { authenticateToken } = require("../controllers/authController");
 router.post("/submit", authenticateToken, submitRouteFeedback);
 router.get("/analytics", authenticateToken, getFeedbackAnalytics);
 
-// Admin routes (you might want to add admin authentication later)
+// Admin routes
 router.get("/ml-data", getMLTrainingData);
 
 module.exports = router;
