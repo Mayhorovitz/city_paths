@@ -270,3 +270,43 @@ deploy/secrets/
 # SSL certificates
 **/*.crt
 **/*.csr
+
+
+# ===== AWS SPECIFIC =====
+# AWS CLI configuration and credentials
+.aws/
+aws-config/
+*.pem
+*.p12
+
+# AWS CloudFormation templates with secrets
+cloudformation/*secrets*
+cloudformation/*.env
+
+# Terraform (if you'll use it later)
+*.tfstate
+*.tfstate.*
+.terraform/
+.terraform.lock.hcl
+
+# AWS SAM
+.aws-sam/
+
+# CDK
+cdk.out/
+*.cdk.staging/
+
+
+# CloudFormation and AWS deployment files
+cloudformation/
+*.pem
+*.key
+*.ppk
+
+# AWS credentials and keys
+aws-credentials/
+deployment-keys/
+
+# Environment-specific configs
+config/production.json
+config/staging.json

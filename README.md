@@ -31,6 +31,8 @@ City Paths computes multiple routes and assigns each a Safety Score based on lig
 - **Database**: PostgreSQL with PostGIS for geospatial queries
 - **ML Service**: Python FastAPI for route safety prediction
 - **Maps & Navigation**: Google Maps API
+- **Cloud Hosting**: AWS EC2
+- **Deployment Tools**: PM2, PostgreSQL CLI, SCP, SSH
 
 ---
 
@@ -63,10 +65,79 @@ Import the collection: [City Paths API Collection](./docs/city_paths_collection.
 
 Run automated tests: `npm test` (backend)
 
+---
+
 ## Installation & Setup
+
+### Prerequisites
+
+- [Node.js](https://nodejs.org/) 18+
+- [PostgreSQL](https://www.postgresql.org/) 15+ with PostGIS
+- [Python](https://www.python.org/) 3.9+
+- [Flutter](https://flutter.dev/) 3.0+
+
+---
+
+### Clone the repository
+
+```bash
+git clone https://github.com/your-username/city_paths.git
+cd city_paths
+```
+
+---
+
+### Backend Setup
+
+#### Database Setup
+
+```bash
+createdb city_paths
+psql city_paths -c "CREATE EXTENSION postgis;"
+```
+
+#### Backend Installation
+
+```bash
+cd backend
+npm install
+
+# Create environment config
+cp .env.example .env
+```
+
+---
+
+### ML Service Setup
+
+```bash
+cd ml_service
+pip install -r requirements.txt
+
+# Create environment config
+cp .env.example .env
+# Run the ML server
+python main.py
+```
+
+---
+
+### Mobile App Setup
+
+```bash
+cd mobile
+flutter pub get
+flutter run
+
+# Create environment config
+cp .env.example .env
+```
+
+---
 
 ## Documentation
 
 - All project documents are available in the [docs](./docs) folder.
 - Backend code is located in the [backend](./backend) folder.
 - Mobile app source code is in the [mobile](./mobile) folder.
+- ML service implementation in the [ml_service](./ml_service).
