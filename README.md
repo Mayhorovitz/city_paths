@@ -2,6 +2,8 @@
 
 **City Paths** is a community-powered safety navigation app that helps people move through cities more safely by suggesting routes optimized for street lighting, open businesses, crime data, and real-time user reports.
 
+![citypaths](https://github.com/Mayhorovitz/city_paths/blob/main/docs/city%20paths.jpg)
+
 ---
 
 # Problem
